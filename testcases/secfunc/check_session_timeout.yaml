@@ -1,0 +1,33 @@
+id: TC-SM-461
+name: Session inactivity timeout
+description: 세션 잠금/종료 타이머 설정 기능 (4.6.1)
+feature: system
+tags: [secfunc, mgmt, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - session cli timeout 30
+      - session http timeout 30
+      - session ftp timeout 30
+validations:
+  - name: CLI 타이머
+    type: regex
+    command: show session config
+    pattern: 'Cli Inactivity Timer in minutes\s*=\s*30'
+  - name: FTP 타이머
+    type: regex
+    command: show session config
+    pattern: 'Ftp Inactivity Timer in minutes\s*=\s*30'
+  - name: HTTP 타이머
+    type: regex
+    command: show session config
+    pattern: 'Http Inactivity Timer in minutes\s*=\s*30'
+cleanup:
+  - action: cli
+    commands:
+      - session cli timeout 4
+      - session http timeout 4
+      - session ftp timeout 4
+continue_on_failure: false
+timeout: 60

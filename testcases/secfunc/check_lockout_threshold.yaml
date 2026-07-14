@@ -1,0 +1,33 @@
+id: TC-IA-131
+name: Authentication failure lockout threshold
+description: 인증 실패 대응 기능 - 잠금 임계값 설정/범위 검증 (1.3.1)
+feature: system
+tags: [secfunc, ia, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - aaa switch-access ip-lockout-threshold 4
+validations:
+  - name: 계정 잠금 임계값 조회
+    type: regex
+    command: show user lockout-setting
+    pattern: 'Threshold:\s*3'
+  - name: IP lockout threshold 반영
+    type: regex
+    command: show aaa switch-access ip-lockout-threshold
+    pattern: 'IP Lockout Threshold\s*=\s*4'
+  - name: threshold 범위 초과 시 거부
+    type: contains
+    command: user lockout-threshold 99999999
+    expected: "ERROR: Lockout threshold is only allowed"
+  - name: duration 범위 초과 시 거부
+    type: contains
+    command: user lockout-duration 99999999
+    expected: "ERROR: Lockout duration is only allowed"
+cleanup:
+  - action: cli
+    commands:
+      - aaa switch-access ip-lockout-threshold 6
+continue_on_failure: false
+timeout: 60

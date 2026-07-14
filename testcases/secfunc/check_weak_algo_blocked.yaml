@@ -1,0 +1,19 @@
+id: TC-IA-151
+name: Weak crypto algorithm rejected for password storage
+description: 약한 알고리즘(MD5 등) 지정 시 계정 생성 차단 확인 (1.5.1)
+feature: system
+tags: [secfunc, ia, required]
+severity: high
+setup: []
+validations:
+  - name: md5 지정 시 차단
+    type: contains
+    command: user tc151 password Test1234@! read-write all md5
+    expected: "Weak cryptographic algorithms"
+  - name: 차단으로 계정 미생성 확인
+    type: not_contains
+    command: show user
+    expected: "tc151"
+cleanup: []
+continue_on_failure: false
+timeout: 60

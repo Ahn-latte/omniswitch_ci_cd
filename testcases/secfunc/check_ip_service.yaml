@@ -1,0 +1,21 @@
+id: TC-SM-41
+name: Remote service enable/disable
+description: 원격 서비스 활성화/비활성화 기능 (4.1)
+feature: system
+tags: [secfunc, mgmt, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - ip service ntp admin-state disable
+validations:
+  - name: NTP 비활성화 반영
+    type: regex
+    command: show ip service
+    pattern: 'ntp\s+123\s+disabled'
+cleanup:
+  - action: cli
+    commands:
+      - ip service ntp admin-state enable
+continue_on_failure: false
+timeout: 60

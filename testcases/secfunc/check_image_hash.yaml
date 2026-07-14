@@ -1,0 +1,15 @@
+id: TC-SM-442
+name: Firmware hash verification
+description: 펌웨어 해시값 비교 검증 (4.4.2). /flash/working에 imgsha256sum 필요.
+feature: system
+tags: [secfunc, mgmt, required, slow]
+severity: high
+setup: []
+validations:
+  - name: 이미지 해시 일치
+    type: contains
+    command: image integrity check working key-file imgsha256sum
+    expected: "SUCCESS: Key matched."
+cleanup: []
+continue_on_failure: false
+timeout: 600

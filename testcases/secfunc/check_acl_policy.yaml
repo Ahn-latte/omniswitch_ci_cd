@@ -1,0 +1,31 @@
+id: TC-FC-311
+name: IP-based ACL policy configuration
+description: IP 주소 기반 ACL(QoS policy) 설정 기능 (3.1.1). 실제 차단은 별도 Ping 시험.
+feature: system
+tags: [secfunc, flow, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - policy condition C1 source ip 10.10.10.20 destination ip 10.10.10.70
+      - policy action A1 disposition deny
+      - policy rule R1 condition C1 action A1
+      - qos apply
+validations:
+  - name: ACL 룰 반영
+    type: contains
+    command: show configuration snapshot qos
+    expected: "policy rule R1 condition C1 action A1"
+  - name: deny 액션 반영
+    type: contains
+    command: show configuration snapshot qos
+    expected: "policy action A1 disposition deny"
+cleanup:
+  - action: cli
+    commands:
+      - no policy rule R1
+      - no policy condition C1
+      - no policy action A1
+      - qos apply
+continue_on_failure: false
+timeout: 60

@@ -1,0 +1,21 @@
+id: TC-AU-842
+name: Audit data export to external log server
+description: 감사데이터 외부 로그서버 전송 기능 (8.4.2)
+feature: system
+tags: [secfunc, audit, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - swlog output socket 1.1.1.1 tls
+validations:
+  - name: 외부 로그서버 설정 반영
+    type: contains
+    command: show swlog
+    expected: "1.1.1.1"
+cleanup:
+  - action: cli
+    commands:
+      - no swlog output socket 1.1.1.1
+continue_on_failure: false
+timeout: 60

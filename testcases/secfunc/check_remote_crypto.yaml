@@ -1,0 +1,23 @@
+id: TC-DP-711
+name: Encrypted channel for remote access
+description: 원격 접속 암호통신 채널 제공 (7.1.1)
+feature: system
+tags: [secfunc, transport, required]
+severity: high
+setup: []
+validations:
+  - name: WebView Force-SSL
+    type: contains
+    command: show webview
+    expected: "WebView Force-SSL = Enabled"
+  - name: SSH 활성화
+    type: contains
+    command: show ssh
+    expected: "Ssh Admin-State = Enabled"
+  - name: 평문 HTTP 미사용
+    type: not_contains
+    command: show webview
+    expected: "Force-SSL = Disabled"
+cleanup: []
+continue_on_failure: false
+timeout: 60
