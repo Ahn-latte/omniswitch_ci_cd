@@ -4,3 +4,4 @@ logs
 reports
 venv
 .env
+**/__pycache__/
