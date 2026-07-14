@@ -7,6 +7,7 @@ from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import BaselineRestoreError, CommandExecutionError
 from switchtest.infrastructure.secrets import get_optional_secret, get_required_secret
 from switchtest.infrastructure.ssh.client import SSHTransport
+from switchtest.infrastructure.ssh.prompt import is_password_prompt
 
 
 class AOSSwitchDriver(BaseSwitchDriver):
@@ -32,8 +33,20 @@ class AOSSwitchDriver(BaseSwitchDriver):
             self.transport.close()
 
     def enter_enable_mode(self) -> None:
-        if self.device.enable_password_env:
-            self._transport().send_command("enable", timeout=self.device.command_timeout)
+        if not self.device.enable_password_env:
+            return
+        transport = self._transport()
+        result = transport.send_interactive(
+            [
+                ("enable", "Password:", False),
+                (transport.auth_secondary or "", "->", True),
+            ],
+            timeout=self.device.command_timeout,
+        )
+        if is_password_prompt(result):
+            raise CommandExecutionError(
+                "Enable authentication failed: device is still requesting a password"
+            )
 
     def enter_config_mode(self) -> None:
         self._transport().send_command("configure terminal", timeout=self.device.command_timeout)

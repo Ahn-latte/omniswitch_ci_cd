@@ -59,6 +59,21 @@ class SSHTransport:
     def send_commands(self, commands: list[str], timeout: int = 30) -> list[str]:
         return [self.send_command(command, timeout=timeout) for command in commands]
 
+    def send_interactive(
+        self,
+        interactions: list[tuple[str, str, bool]],
+        timeout: int = 30,
+    ) -> str:
+        """Drive a command that expects intermediate prompts (e.g. ``Password:``).
+
+        Each interaction is ``(channel_input, expected_prompt, hidden_input)``;
+        set ``hidden_input`` to ``True`` for secrets so they are not echoed.
+        """
+        if self._connection is None:
+            raise ConnectionError("SSH connection is not open")
+        response = self._connection.send_interactive(interactions, timeout_ops=timeout)
+        return str(response.result)
+
     def close(self) -> None:
         if self._connection is not None:
             try:
