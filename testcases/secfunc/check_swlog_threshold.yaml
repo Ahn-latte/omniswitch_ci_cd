@@ -1,0 +1,21 @@
+id: TC-AU-831
+name: Audit trail threshold alert
+description: 감사증적 임계치 초과 알림 설정 (8.3.1)
+feature: system
+tags: [secfunc, audit, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - swlog size-trap-threshold 89
+validations:
+  - name: 임계치 반영
+    type: regex
+    command: show swlog
+    pattern: 'Swlog Threshold\s*:\s*89 percent'
+cleanup:
+  - action: cli
+    commands:
+      - swlog size-trap-threshold 90
+continue_on_failure: false
+timeout: 60

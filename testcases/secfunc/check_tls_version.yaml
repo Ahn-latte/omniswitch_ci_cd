@@ -1,0 +1,15 @@
+id: TC-DP-716
+name: TLS 1.2 or higher
+description: TLS 1.2 이상 지원 (7.1.6)
+feature: system
+tags: [secfunc, transport, required]
+severity: high
+setup: []
+validations:
+  - name: WebView TLS 버전
+    type: regex
+    command: show webview
+    pattern: 'TLS Version\s*=\s*1\.[23]'
+cleanup: []
+continue_on_failure: false
+timeout: 60

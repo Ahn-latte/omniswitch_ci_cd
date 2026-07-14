@@ -1,0 +1,19 @@
+id: TC-ST-513
+name: On-demand hardware and process self-test
+description: 관리자 자체검사 직접 실행 기능 (5.1.3)
+feature: system
+tags: [secfunc, selftest, optional]
+severity: medium
+setup: []
+validations:
+  - name: 하드웨어 자체검사
+    type: contains
+    command: show aaa switch-access hardware-self-test
+    expected: "Checking CPU Status ---> Ok"
+  - name: 프로세스 자체검사
+    type: contains
+    command: show aaa switch-access process-self-test
+    expected: "Chassis Supervision Process ---> Ok"
+cleanup: []
+continue_on_failure: false
+timeout: 120

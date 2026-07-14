@@ -1,0 +1,23 @@
+id: TC-SM-441
+name: Firmware version display
+description: 펌웨어 버전 확인 기능 (4.4.1)
+feature: system
+tags: [secfunc, mgmt, required, smoke]
+severity: high
+setup: []
+validations:
+  - name: working 이미지 버전
+    type: contains
+    command: show microcode working
+    expected: "8.10.112.R02"
+  - name: certified 이미지 버전
+    type: contains
+    command: show microcode certified
+    expected: "8.10.112.R02"
+  - name: loaded 이미지 버전
+    type: contains
+    command: show microcode loaded
+    expected: "8.10.112.R02"
+cleanup: []
+continue_on_failure: false
+timeout: 60

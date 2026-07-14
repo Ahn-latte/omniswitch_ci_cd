@@ -1,0 +1,19 @@
+id: TC-DP-717
+name: SSH v2 support
+description: SSH v2 이상 지원 (7.1.7). 프로토콜 버전은 패킷캡처 병행.
+feature: system
+tags: [secfunc, transport, required]
+severity: high
+setup: []
+validations:
+  - name: SSH 활성화
+    type: contains
+    command: show ssh
+    expected: "Ssh Admin-State = Enabled"
+  - name: Strong Ciphers
+    type: contains
+    command: show ssh
+    expected: "Ssh Strong-Ciphers = Enabled"
+cleanup: []
+continue_on_failure: false
+timeout: 60

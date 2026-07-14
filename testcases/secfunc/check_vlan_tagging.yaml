@@ -1,0 +1,22 @@
+id: TC-FC-312
+name: IEEE 802.1Q VLAN tagging
+description: VLAN 802.1Q 태깅 기능 (3.1.2)
+feature: system
+tags: [secfunc, flow, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - vlan 10
+      - vlan 10 members port 1/1/15 tagged
+validations:
+  - name: qtagged 멤버십 확인
+    type: contains
+    command: show vlan members port 1/1/15
+    expected: "qtagged"
+cleanup:
+  - action: cli
+    commands:
+      - no vlan 10 members port 1/1/15
+continue_on_failure: false
+timeout: 60

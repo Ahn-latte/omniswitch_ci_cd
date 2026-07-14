@@ -1,0 +1,25 @@
+id: TC-DP-712
+name: Syslog over TLS
+description: 별도 로그서버 연동 시 TLS 암호통신 (7.1.2)
+feature: system
+tags: [secfunc, transport, optional]
+severity: medium
+setup:
+  - action: cli
+    commands:
+      - swlog output socket 192.168.10.50 tls
+validations:
+  - name: Swlog over TLS 활성화
+    type: regex
+    command: show swlog
+    pattern: 'Swlog over TLS\s*:\s*Enabled'
+  - name: 로그서버 등록
+    type: contains
+    command: show swlog
+    expected: "192.168.10.50"
+cleanup:
+  - action: cli
+    commands:
+      - no swlog output socket 192.168.10.50
+continue_on_failure: false
+timeout: 60
