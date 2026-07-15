@@ -13,7 +13,7 @@ validations:
   - name: qtagged 멤버십 확인
     type: contains
     command: show vlan members port 1/1/15
-    expected: "qtagged"
+    expected: "tagged"
 cleanup:
   - action: cli
     commands:
