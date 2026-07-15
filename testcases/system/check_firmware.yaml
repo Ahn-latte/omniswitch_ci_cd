@@ -11,7 +11,7 @@ validations:
   - name: Firmware version matches expected release
     type: contains
     command: show system
-    expected: "8.9.221.R03 GA"
+    expected: "8.10.86.R04"
 
 cleanup: []
 
