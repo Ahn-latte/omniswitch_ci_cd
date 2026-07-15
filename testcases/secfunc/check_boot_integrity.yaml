@@ -1,0 +1,19 @@
+id: TC-ST-521
+name: Firmware image integrity check at boot
+description: 장비 구동 시 펌웨어 이미지 무결성 검사 수행 확인 (5.2.1)
+feature: system
+tags: [secfunc, selftest, required, boot]
+severity: high
+setup: []
+validations:
+  - name: 부팅 시 이미지 무결성 검사 성공
+    type: contains
+    command: show log swlog | grep -i integrity
+    expected: "AOS image integrity check successful"
+  - name: 무결성 검사 실패 로그 부재
+    type: not_contains
+    command: show log swlog | grep -i integrity
+    expected: "integrity check failed"
+cleanup: []
+continue_on_failure: false
+timeout: 120
