@@ -14,6 +14,7 @@ from switchtest.infrastructure.reporting.junit_report import write_junit_report
 from switchtest.services.baseline_service import BaselineService
 from switchtest.services.execution_service import ExecutionService
 from switchtest.services.metadata_service import MetadataService
+from switchtest.services.recovery_service import RecoveryService
 from switchtest.services.validation_service import ValidationService
 from switchtest.utils.time import utcnow
 
@@ -22,6 +23,7 @@ class Orchestrator:
     def __init__(self) -> None:
         self.baseline_service = BaselineService()
         self.metadata_service = MetadataService()
+        self.recovery_service = RecoveryService()
 
     def run_suite(
         self,
@@ -50,7 +52,16 @@ class Orchestrator:
                     status = SuiteStatus.FAIL
                 if test_result.status == ResultStatus.ERROR:
                     status = SuiteStatus.ERROR
-                if testcase.restore_baseline_after and not context.dry_run:
+                    if not context.dry_run:
+                        try:
+                            self.recovery_service.reconnect(driver)
+                        except Exception:
+                            context.device_state = DeviceSafetyState.UNSAFE
+                if (
+                    testcase.restore_baseline_after
+                    and not context.dry_run
+                    and context.device_state != DeviceSafetyState.UNSAFE
+                ):
                     self.baseline_service.restore(context, driver, device)
                 if context.device_state == DeviceSafetyState.UNSAFE:
                     status = SuiteStatus.ERROR

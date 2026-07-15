@@ -14,22 +14,27 @@ validations:
     type: regex
     command: show log swlog | grep -i login
     pattern: 'login.*success'
+    timeout: 90
   - name: 인증 실패 기록
     type: regex
     command: show log swlog | grep -i login
     pattern: 'login.*fail'
+    timeout: 90
   - name: 펌웨어 업데이트 기록
     type: contains
     command: show log swlog | grep -i upgra
     expected: "AOS upgrade or downgrade complete"
+    timeout: 90
   - name: 무결성 검사 기록
     type: contains
     command: show log swlog | grep -i integrity
     expected: "integrity check successful"
+    timeout: 90
   - name: 서비스 활성화/비활성화 기록
     type: regex
     command: show log swlog | grep -i "ip service"
     pattern: 'cmd: ip service \w+ admin-state (enable|disable), result: SUCCESS'
+    timeout: 90
 cleanup: []
 continue_on_failure: true
 timeout: 180

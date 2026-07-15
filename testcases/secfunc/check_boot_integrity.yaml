@@ -10,10 +10,12 @@ validations:
     type: contains
     command: show log swlog | grep -i integrity
     expected: "AOS image integrity check successful"
+    timeout: 90
   - name: 무결성 검사 실패 로그 부재
     type: not_contains
     command: show log swlog | grep -i integrity
     expected: "integrity check failed"
+    timeout: 90
 cleanup: []
 continue_on_failure: false
 timeout: 120

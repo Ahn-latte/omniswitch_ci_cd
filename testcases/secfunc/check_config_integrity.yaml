@@ -11,6 +11,7 @@ validations:
     type: contains
     command: show log swlog | grep -i "config integrity"
     expected: "AOS config integrity check successful"
+    timeout: 90
 cleanup: []
 continue_on_failure: false
 timeout: 120
