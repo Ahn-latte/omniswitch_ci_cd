@@ -11,26 +11,31 @@ validations:
     command: show log swlog | grep -i ssapp
     expected: "SSAPP"
     timeout: 90
+    reauth: true
   - name: CPU 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "CPU Status"
     pattern: 'CPU Status\s*--->\s*Ok'
     timeout: 90
+    reauth: true
   - name: 메모리 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "Memory Status"
     pattern: 'Memory Status\s*--->\s*Ok'
     timeout: 90
+    reauth: true
   - name: 플래시 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "Flash Status"
     pattern: 'Flash Status\s*--->\s*Ok'
     timeout: 90
+    reauth: true
   - name: NI 모듈 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "NI Module Status"
     pattern: 'NI Module Status\s*--->\s*Ok'
     timeout: 90
+    reauth: true
 cleanup: []
 continue_on_failure: false
 timeout: 120

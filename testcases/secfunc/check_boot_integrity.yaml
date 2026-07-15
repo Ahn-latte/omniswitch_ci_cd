@@ -11,11 +11,13 @@ validations:
     command: show log swlog | grep -i integrity
     expected: "AOS image integrity check successful"
     timeout: 90
+    reauth: true
   - name: 무결성 검사 실패 로그 부재
     type: not_contains
     command: show log swlog | grep -i integrity
     expected: "integrity check failed"
     timeout: 90
+    reauth: true
 cleanup: []
 continue_on_failure: false
 timeout: 120

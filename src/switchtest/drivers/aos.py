@@ -7,7 +7,7 @@ from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import BaselineRestoreError, CommandExecutionError
 from switchtest.infrastructure.secrets import get_optional_secret, get_required_secret
 from switchtest.infrastructure.ssh.client import SSHTransport
-from switchtest.infrastructure.ssh.prompt import is_password_prompt
+from switchtest.infrastructure.ssh.prompt import PASSWORD_PROMPT_PATTERN, is_password_prompt
 
 
 class AOSSwitchDriver(BaseSwitchDriver):
@@ -54,7 +54,9 @@ class AOSSwitchDriver(BaseSwitchDriver):
     def exit_config_mode(self) -> None:
         self._transport().send_command("end", timeout=self.device.command_timeout)
 
-    def run_show(self, command: str, timeout: int = 30) -> str:
+    def run_show(self, command: str, timeout: int = 30, reauth: bool = False) -> str:
+        if reauth:
+            return self._run_show_with_reauth(command, timeout)
         output = self._transport().send_command(command, timeout=timeout)
         cleaned = _clean_show_output(output, command)
         if cleaned:
@@ -62,6 +64,18 @@ class AOSSwitchDriver(BaseSwitchDriver):
         time.sleep(0.2)
         retry_output = self._transport().send_command(command, timeout=timeout)
         return _clean_show_output(retry_output, command)
+
+    def _run_show_with_reauth(self, command: str, timeout: int) -> str:
+        transport = self._transport()
+        prompt = self.device.expected_prompt or "->"
+        output = transport.send_interactive(
+            [
+                (command, "Password:", False),
+                (transport.auth_password, prompt, True),
+            ],
+            timeout=timeout,
+        )
+        return _clean_show_output(output, command)
 
     def apply_config(self, commands: list[str], timeout: int = 30) -> list[str]:
         outputs = self._transport().send_commands(commands, timeout=timeout)
@@ -151,6 +165,8 @@ def _clean_show_output(text: str, command: str) -> str:
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
+            continue
+        if PASSWORD_PROMPT_PATTERN.search(stripped):
             continue
         lowered = stripped.lower()
         if lowered == normalized_command:

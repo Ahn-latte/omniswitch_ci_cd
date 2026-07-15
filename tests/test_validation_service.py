@@ -4,7 +4,7 @@ from switchtest.services.validation_service import ValidationService
 
 
 class StubDriver:
-    def run_show(self, command: str, timeout: int = 30) -> str:
+    def run_show(self, command: str, timeout: int = 30, reauth: bool = False) -> str:
         if command == "show vlan":
             return "VLAN 100 CI_TEST_VLAN100"
         return "Version 1.0"
