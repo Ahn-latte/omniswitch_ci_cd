@@ -1,0 +1,5 @@
+name: suite8
+description: 8.x - 감사(AU) 항목 검증
+tests:
+  - ../testcases/secfunc/check_swlog_threshold.yaml
+  - ../testcases/secfunc/check_swlog_export.yaml

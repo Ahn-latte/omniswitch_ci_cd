@@ -1,0 +1,7 @@
+name: suite4
+description: 4.x - 보안관리(SM) 항목 검증
+tests:
+  - ../testcases/secfunc/check_ip_service.yaml
+  - ../testcases/secfunc/check_firmware_version.yaml
+  - ../testcases/secfunc/check_image_hash.yaml
+  - ../testcases/secfunc/check_session_timeout.yaml

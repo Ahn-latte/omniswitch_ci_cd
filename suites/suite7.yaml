@@ -1,0 +1,7 @@
+name: suite7
+description: 7.x - 데이터보호(DP) 항목 검증
+tests:
+  - ../testcases/secfunc/check_remote_crypto.yaml
+  - ../testcases/secfunc/check_syslog_tls.yaml
+  - ../testcases/secfunc/check_tls_version.yaml
+  - ../testcases/secfunc/check_ssh_version.yaml

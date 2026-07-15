@@ -1,0 +1,5 @@
+name: suite3
+description: 3.x - 흐름제어(FC) 항목 검증
+tests:
+  - ../testcases/secfunc/check_acl_policy.yaml
+  - ../testcases/secfunc/check_vlan_tagging.yaml

@@ -1,0 +1,4 @@
+name: suite5
+description: 5.x - 자체시험(ST) 항목 검증
+tests:
+  - ../testcases/secfunc/check_self_test.yaml
