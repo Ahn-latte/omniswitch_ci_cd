@@ -1,0 +1,36 @@
+id: TC-AU-821
+name: Audit data required fields
+description: 감사 데이터에 일시/유형/주체/결과 포함 확인 (8.2.1). 주체 IP는 SSH 로그인 로그로 확인.
+feature: system
+tags: [secfunc, audit, required]
+severity: high
+setup:
+  - action: save_config
+validations:
+  - name: CLI log에 주체(user) 포함
+    type: contains
+    command: show log swlog | grep -i "cli log"
+    expected: "CLI log, user:"
+    timeout: 90
+    reauth: true
+  - name: CLI log에 결과(result) 포함
+    type: contains
+    command: show log swlog | grep -i "cli log"
+    expected: "result: SUCCESS"
+    timeout: 90
+    reauth: true
+  - name: 사건 발생 일시 포함
+    type: regex
+    command: show log swlog | grep -i "cli log"
+    pattern: '\d{4}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}'
+    timeout: 90
+    reauth: true
+  - name: SSH 로그인 기록에 출발지 IP 포함
+    type: regex
+    command: show log swlog | grep -i ssh
+    pattern: 'from\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+    timeout: 90
+    reauth: true
+cleanup: []
+continue_on_failure: false
+timeout: 120

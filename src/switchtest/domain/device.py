@@ -14,6 +14,7 @@ class DeviceDefinition(BaseModel):
     baseline_strategy: str = "load_config"
     baseline_source: Optional[str] = None
     expected_prompt: Optional[str] = None
+    expected_firmware: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
     connection_timeout: int = 15
     command_timeout: int = 30

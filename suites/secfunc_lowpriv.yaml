@@ -1,0 +1,4 @@
+name: secfunc_lowpriv
+description: 저권한 계정으로 수행하는 감사데이터 접근통제 시험 (8.4.1)
+tests:
+  - ../testcases/secfunc/check_audit_access_restriction.yaml

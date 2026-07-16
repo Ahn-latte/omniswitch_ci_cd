@@ -1,0 +1,23 @@
+id: TC-AU-841
+name: Audit data access restriction (low-privilege account)
+description: 인가된 관리자만 감사데이터 접근 가능 확인 (8.4.1). 반드시 저권한 계정 device로 실행 - secureadmin으로 돌리면 통과해버려 무의미.
+feature: system
+tags: [secfunc, audit, required, lowpriv]
+severity: high
+setup: []
+validations:
+  - name: 감사로그 열람 차단
+    type: contains
+    command: show log swlog
+    expected: "ERROR: Authorization failed"
+  - name: 감사로그 삭제 차단
+    type: contains
+    command: swlog clear all
+    expected: "allowed only for secureadmin"
+  - name: 감사로그 복사 차단
+    type: contains
+    command: cp swlog_chassis1
+    expected: "allowed only for secureadmin"
+cleanup: []
+continue_on_failure: true
+timeout: 60

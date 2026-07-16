@@ -1,15 +1,28 @@
 devices:
   - name: ACSSW01
-    host: 192.168.70.1
+    host: 192.168.1.1
     port: 22
-    username: admin
+    username: admin1
     password_env: SWITCH_SW1_PASSWORD
     enable_password_env: SWITCH_SW1_ENABLE_PASSWORD
     platform: aos
     baseline_strategy: load_config
     baseline_source: configs/baselines/core_switch.cfg
-    expected_prompt: "ACSW01->"
+    expected_prompt: "->"
+    expected_firmware: "8.10.86.R04"
     tags: [lab, core]
+    connection_timeout: 15
+    command_timeout: 30
+    strict_host_key: false
+
+  - name: lowpriv
+    host: 192.168.1.1
+    port: 22
+    username: user1
+    password_env: SWITCH_OS6870_USER1_PASSWORD
+    platform: aos
+    expected_prompt: "->"
+    tags: [lab, secfunc, lowpriv]
     connection_timeout: 15
     command_timeout: 30
     strict_host_key: false

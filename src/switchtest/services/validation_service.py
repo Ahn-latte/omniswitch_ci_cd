@@ -82,4 +82,4 @@ class ValidationService:
     def _run_show(self, driver: BaseSwitchDriver, validation: ValidationStep) -> str:
         if not validation.command:
             raise ValidationExecutionError(f"Validation '{validation.name}' requires a command")
-        return driver.run_show(validation.command, timeout=validation.timeout)
+        return driver.run_show(validation.command, timeout=validation.timeout, reauth=validation.reauth)

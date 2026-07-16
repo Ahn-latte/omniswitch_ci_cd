@@ -1,0 +1,45 @@
+id: TC-AU-811
+name: Audit data generation
+description: 인증 성공/실패, 펌웨어 업데이트, 무결성 검사, 서비스 활성화/비활성화 감사 데이터 생성 확인 (8.1.1)
+feature: system
+tags: [secfunc, audit, required]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+validations:
+  - name: 인증 성공 기록
+    type: regex
+    command: show log swlog | grep -i login
+    pattern: '(?i)login.*success'
+    timeout: 90
+    reauth: true
+  - name: 인증 실패 기록
+    type: regex
+    command: show log swlog | grep -i login
+    pattern: '(?i)login.*fail'
+    timeout: 90
+    reauth: true
+  - name: 펌웨어 업데이트 기록
+    type: contains
+    command: show log swlog | grep -i upgra
+    expected: "AOS upgrade or downgrade complete"
+    timeout: 90
+    reauth: true
+  - name: 무결성 검사 기록
+    type: contains
+    command: show log swlog | grep -i integrity
+    expected: "integrity check successful"
+    timeout: 90
+    reauth: true
+  - name: 서비스 활성화/비활성화 기록
+    type: regex
+    command: show log swlog | grep -i "ip service"
+    pattern: 'cmd: ip service \w+ admin-state (enable|disable), result: SUCCESS'
+    timeout: 90
+    reauth: true
+cleanup: []
+continue_on_failure: true
+timeout: 180

@@ -34,7 +34,8 @@ class RunArguments:
 def run_application(args: RunArguments) -> int:
     try:
         device = load_device_by_name(args.devices_file, args.device_name)
-        suite, tests = load_suite_testcases(args.suite_path)
+        variables = {"expected_firmware": device.expected_firmware or ""}
+        suite, tests = load_suite_testcases(args.suite_path, variables=variables)
         context = RuntimeContext(
             run_id=make_run_id(),
             device_name=device.name,

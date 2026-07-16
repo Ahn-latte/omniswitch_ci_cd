@@ -1,0 +1,9 @@
+name: secfunc_auto
+description: 저권한 계정 분리가 필요 없는 자동화 가능 secfunc 항목 (자체시험/감사 생성·필드)
+tests:
+  - ../testcases/secfunc/check_boot_hw_selftest.yaml
+  - ../testcases/secfunc/check_boot_process_selftest.yaml
+  - ../testcases/secfunc/check_boot_integrity.yaml
+  - ../testcases/secfunc/check_config_integrity.yaml
+  - ../testcases/secfunc/check_audit_generation.yaml
+  - ../testcases/secfunc/check_audit_fields.yaml

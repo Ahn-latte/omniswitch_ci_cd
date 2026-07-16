@@ -19,6 +19,7 @@ class ValidationStep(BaseModel):
     pattern: Optional[str] = None
     target: Optional[str] = None
     timeout: int = 30
+    reauth: bool = False
 
 
 class TestCaseDefinition(BaseModel):
