@@ -15,12 +15,14 @@ def load_suite(path: Path) -> SuiteDefinition:
         raise LoaderError(f"Invalid suite file {path}: {exc}") from exc
 
 
-def load_suite_testcases(path: Path) -> tuple[SuiteDefinition, list[TestCaseDefinition]]:
+def load_suite_testcases(
+    path: Path, variables: dict[str, str] | None = None
+) -> tuple[SuiteDefinition, list[TestCaseDefinition]]:
     suite = load_suite(path)
     tests: list[TestCaseDefinition] = []
     for test_ref in suite.tests:
         test_path = resolve_relative_path(path, test_ref)
-        tests.append(load_testcase(test_path))
+        tests.append(load_testcase(test_path, variables=variables))
     if not tests:
         raise LoaderError(f"Suite {path} does not contain any tests")
     return suite, tests

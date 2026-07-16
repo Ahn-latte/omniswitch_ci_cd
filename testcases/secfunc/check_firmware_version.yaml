@@ -9,15 +9,15 @@ validations:
   - name: working 이미지 버전
     type: contains
     command: show microcode working
-    expected: "8.10.86.R04"
+    expected: "$expected_firmware"
   - name: certified 이미지 버전
     type: contains
     command: show microcode certified
-    expected: "8.10.86.R04"
+    expected: "$expected_firmware"
   - name: loaded 이미지 버전
     type: contains
     command: show microcode loaded
-    expected: "8.10.86.R04"
+    expected: "$expected_firmware"
 cleanup: []
 continue_on_failure: false
 timeout: 60

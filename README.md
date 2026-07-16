@@ -123,6 +123,7 @@ devices:
     baseline_strategy: load_config
     baseline_source: configs/baselines/core_switch.cfg
     expected_prompt: "->"
+    expected_firmware: "8.10.86.R04"
     tags: [lab, core]
     connection_timeout: 15
     command_timeout: 30
@@ -146,6 +147,7 @@ Important:
 - `platform` currently supports `aos`.
 - The framework does not provision device accounts. Any account referenced by a device entry (e.g. `lowpriv`'s `user1`) must already exist on the switch, created out-of-band, before tests run against it.
 - A separate low-privilege device entry is needed whenever a testcase must prove that a restricted account is denied a privileged action — running that testcase under an admin/secureadmin account would make the check meaningless (it would always pass).
+- `expected_firmware` is the single source of truth for what firmware version a device is supposed to be running. Testcases reference it instead of hardcoding a version — see [Version Templating](#version-templating) below. Bump it here when the switch gets a new release; you don't need to touch any testcase files.
 
 ### Secrets
 
@@ -296,6 +298,26 @@ Each validation also supports:
 
 - `timeout` — per-command timeout in seconds (default `30`). Bump this for commands that return large output (e.g. `show log swlog`).
 - `reauth` — set to `true` when the switch prompts for the account's password again before returning this command's output (observed on this device for privileged/audit-log commands such as `show log swlog`). The driver answers the prompt with the same password used to log in. Leave `false` for ordinary `show` commands.
+
+## Version Templating
+
+Testcases that check a firmware release should not hardcode the version string — write `$expected_firmware` in `expected` (or `pattern`) instead:
+
+```yaml
+validations:
+  - name: Firmware version matches expected release
+    type: contains
+    command: show system
+    expected: "$expected_firmware"
+```
+
+At run time, `switchtest run` substitutes `$expected_firmware` with the `expected_firmware` value from the `--device` entry in `configs/devices.yaml`. To test a new firmware release, update `expected_firmware` in one place (the device entry) — every testcase that references it picks up the new value automatically, no need to edit `testcases/system/check_firmware.yaml`, `testcases/secfunc/check_firmware_version.yaml`, or any other file by hand.
+
+Notes:
+- This only substitutes `expected`/`pattern` fields inside `validations`, not `command` or `setup`/`cleanup` steps.
+- `validate-testcase`/`validate-suite` don't have a device context, so they leave `$expected_firmware` as a literal string — that's expected, it's still valid YAML/schema. Only `run` (which always has a `--device`) performs the substitution.
+- If a device has no `expected_firmware` set, `$expected_firmware` resolves to an empty string, so any testcase referencing it will fail its `contains`/`equals` check against that device — set `expected_firmware` on any device you intend to run firmware-version testcases against.
+- Model name (`OS6900-X48C6`, etc.) is not templated because no testcase checks it — it only shows up as informational metadata (`show system` → `Model:` in the summary/report).
 
 ## Suites
 

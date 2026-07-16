@@ -9,6 +9,7 @@ devices:
     baseline_strategy: load_config
     baseline_source: configs/baselines/core_switch.cfg
     expected_prompt: "->"
+    expected_firmware: "8.10.86.R04"
     tags: [lab, core]
     connection_timeout: 15
     command_timeout: 30
