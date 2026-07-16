@@ -48,7 +48,8 @@ The project currently supports:
 - CIS-aligned smoke checks for AOS8 management hardening,
 - security-functional (`secfunc`) checks aligned to a numbered requirements checklist (self-test, audit, access control, etc.),
 - automatic reconnect after a mid-suite connection failure,
-- re-authentication handling for commands that prompt for a password mid-session (e.g. privileged audit-log access).
+- re-authentication handling for commands that prompt for a password mid-session (e.g. privileged audit-log access),
+- live console progress (`[2/6] Running TC-ST-512: ...` / `[2/6] TC-ST-512 -> PASS (1.4s)`) as each test starts and finishes.
 
 ## Project Structure
 

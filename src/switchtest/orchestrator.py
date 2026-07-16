@@ -1,3 +1,5 @@
+import typer
+
 from switchtest.domain.device import DeviceDefinition
 from switchtest.domain.enums import DeviceSafetyState, ResultStatus, SuiteStatus
 from switchtest.domain.results import SuiteResult
@@ -45,9 +47,16 @@ class Orchestrator:
                 self.baseline_service.verify_baseline(driver, device)
             validation_service = ValidationService()
             execution_service = ExecutionService(driver=driver, validation_service=validation_service)
-            for testcase in _filter_tests_by_tags(tests, context.selected_tags):
+            selected_tests = _filter_tests_by_tags(tests, context.selected_tags)
+            total = len(selected_tests)
+            for index, testcase in enumerate(selected_tests, start=1):
+                typer.echo(f"[{index}/{total}] Running {testcase.id}: {testcase.name}...")
                 test_result = execution_service.run_test(context, testcase)
                 results.append(test_result)
+                typer.echo(
+                    f"[{index}/{total}] {testcase.id} -> "
+                    f"{test_result.status.value.upper()} ({test_result.duration_seconds:.1f}s)"
+                )
                 if test_result.status == ResultStatus.FAIL:
                     status = SuiteStatus.FAIL
                 if test_result.status == ResultStatus.ERROR:
