@@ -13,13 +13,13 @@ validations:
   - name: 인증 성공 기록
     type: regex
     command: show log swlog | grep -i login
-    pattern: 'login.*success'
+    pattern: '(?i)login.*success'
     timeout: 90
     reauth: true
   - name: 인증 실패 기록
     type: regex
     command: show log swlog | grep -i login
-    pattern: 'login.*fail'
+    pattern: '(?i)login.*fail'
     timeout: 90
     reauth: true
   - name: 펌웨어 업데이트 기록

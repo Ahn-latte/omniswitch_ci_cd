@@ -9,25 +9,25 @@ validations:
   - name: Chassis Supervision 프로세스 Ok
     type: regex
     command: show log swlog | grep -i "Chassis Supervision Process"
-    pattern: 'Chassis Supervision Process\s*--->\s*Ok'
+    pattern: 'Chassis Supervision Process\s*-->\s*OK'
     timeout: 90
     reauth: true
   - name: AAA 프로세스 Ok
     type: regex
     command: show log swlog | grep -i "AAA Process"
-    pattern: 'AAA Process\s*--->\s*Ok'
+    pattern: 'AAA Process\s*-->\s*OK'
     timeout: 90
     reauth: true
   - name: Configuration Manager 프로세스 Ok
     type: regex
     command: show log swlog | grep -i "Configuration Manager Process"
-    pattern: 'Configuration Manager Process\s*--->\s*Ok'
+    pattern: 'Configuration Manager Process\s*-->\s*OK'
     timeout: 90
     reauth: true
   - name: VLAN Manager 프로세스 Ok
     type: regex
     command: show log swlog | grep -i "VLAN Manager Process"
-    pattern: 'VLAN Manager Process\s*--->\s*Ok'
+    pattern: 'VLAN Manager Process\s*-->\s*OK'
     timeout: 90
     reauth: true
 cleanup: []
