@@ -68,10 +68,17 @@ class AOSSwitchDriver(BaseSwitchDriver):
     def _run_show_with_reauth(self, command: str, timeout: int) -> str:
         transport = self._transport()
         prompt = self.device.expected_prompt or "->"
+        # Anchor the completion prompt to a whole line. scrapli only treats a
+        # pattern as a (multiline) regex when it starts with ^ and ends with $;
+        # anything else is matched as a bare substring. A bare "->" would match
+        # the "--->" arrows that pepper swlog output (e.g. "Process ---> Ok"),
+        # cutting the read off at the first such line and dropping everything
+        # after it. Anchoring makes it match only the trailing CLI prompt line.
+        prompt_pattern = f"^.*{re.escape(prompt)}\\s*$"
         output = transport.send_interactive(
             [
                 (command, "Password:", False),
-                (transport.auth_password, prompt, True),
+                (transport.auth_password, prompt_pattern, True),
             ],
             timeout=timeout,
         )

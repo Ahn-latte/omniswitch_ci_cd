@@ -15,25 +15,25 @@ validations:
   - name: CPU 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "CPU Status"
-    pattern: 'CPU Status\s*--->\s*Ok'
+    pattern: 'CPU Status\s*-+>\s*(?i:ok)'
     timeout: 90
     reauth: true
   - name: 메모리 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "Memory Status"
-    pattern: 'Memory Status\s*--->\s*Ok'
+    pattern: 'Memory Status\s*-+>\s*(?i:ok)'
     timeout: 90
     reauth: true
   - name: 플래시 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "Flash Status"
-    pattern: 'Flash Status\s*--->\s*Ok'
+    pattern: 'Flash Status\s*-+>\s*(?i:ok)'
     timeout: 90
     reauth: true
   - name: NI 모듈 점검 결과 Ok
     type: regex
     command: show log swlog | grep -i "NI Module Status"
-    pattern: 'NI Module Status\s*--->\s*Ok'
+    pattern: 'NI Module Status\s*-+>\s*(?i:ok)'
     timeout: 90
     reauth: true
 cleanup: []
