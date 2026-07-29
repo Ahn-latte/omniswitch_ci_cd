@@ -2,6 +2,8 @@ name: suite1
 description: 1.x - 식별 및 인증(I&A) 항목 검증
 tests:
   - ../testcases/secfunc/check_password_policy.yaml
+  - ../testcases/secfunc/check_password_policy_enforcement_create.yaml
+  - ../testcases/secfunc/check_password_policy_enforcement_change.yaml
   - ../testcases/secfunc/check_lockout_threshold.yaml
   - ../testcases/secfunc/check_lockout_duration.yaml
   - ../testcases/secfunc/check_weak_algo_blocked.yaml
