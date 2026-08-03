@@ -1,21 +1,52 @@
 id: TC-AU-831
-name: Audit trail threshold alert
-description: 감사증적 임계치 초과 알림 설정 (8.3.1)
+name: Audit trail overwrite on threshold exceed
+description: 감사증적 저장용량 오버라이팅 설정 확인 - 임계치를 최저 한도인 50%로 설정하고 로그 레벨 상향 및 flash 파일 크기 축소(125)로 오버라이팅을 유도한 뒤, 감사데이터 내 용량초과 알림 기록 확인 (8.3.1)
 feature: system
 tags: [secfunc, audit, required]
 severity: high
 setup:
   - action: cli
     commands:
-      - swlog size-trap-threshold 89
+      - swlog size-trap-threshold 50
+      - swlog appid intfni subapp all level debug3
+      - swlog output flash-file-size 125
+      # 아래 반복 토글은 swlog 항목을 인위적으로 쌓아 flash-file-size(125) 한도를 넘겨 오버라이팅을 유도하기 위함.
+      # 반복 횟수는 실제 장비의 로그당 용량에 따라 튜닝이 필요할 수 있음.
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state enable
 validations:
-  - name: 임계치 반영
+  - name: 임계치 반영 (최저 한도 50%)
     type: regex
     command: show swlog
-    pattern: 'Swlog Threshold\s*:\s*89 percent'
+    pattern: 'Swlog Threshold\s*:\s*50 percent'
+  - name: 용량초과 알림 감사데이터 기록
+    type: regex
+    command: show log swlog | grep -i threshold
+    pattern: '(?i)threshold.*(exceed|percent|reach)'
+    timeout: 90
+    reauth: true
 cleanup:
   - action: cli
     commands:
+      - swlog output flash-file-size 1250
       - swlog size-trap-threshold 90
 continue_on_failure: false
-timeout: 60
+timeout: 180

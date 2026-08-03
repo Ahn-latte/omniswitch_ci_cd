@@ -1,6 +1,6 @@
 id: TC-FC-311
 name: IP-based ACL policy configuration
-description: IP 주소 기반 ACL(QoS policy) 설정 기능 (3.1.1). 실제 차단은 별도 Ping 시험.
+description: IP 주소 기반 ACL(QoS policy) 설정 기능 및 설정 시 감사데이터 생성 확인 (3.1.1). 실제 차단은 별도 Ping 시험.
 feature: system
 tags: [secfunc, flow, required]
 severity: high
@@ -20,6 +20,12 @@ validations:
     type: contains
     command: show configuration snapshot qos
     expected: "policy action A1 disposition deny"
+  - name: ACL 정책 설정 감사데이터 기록
+    type: regex
+    command: show log swlog | grep -i "policy rule R1"
+    pattern: 'cmd: policy rule R1 condition C1 action A1, result: SUCCESS'
+    timeout: 90
+    reauth: true
 cleanup:
   - action: cli
     commands:
@@ -28,4 +34,4 @@ cleanup:
       - no policy action A1
       - qos apply
 continue_on_failure: false
-timeout: 60
+timeout: 120
