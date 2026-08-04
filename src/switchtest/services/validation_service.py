@@ -115,18 +115,18 @@ class ValidationService:
 
     def _validate_tls_version(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
         interface = os.environ.get("SWITCHTEST_CAPTURE_INTERFACE", "")
-        version_name, raw_hex = capture_tls_version(
+        version_name, raw_hex, pcap_path = capture_tls_version(
             interface, validation.target or "", validation.port or 0, duration=validation.timeout
         )
         expected = validation.expected or "TLS 1.2"
-        observed = f"{version_name} ({raw_hex})"
+        observed = f"{version_name} ({raw_hex}) -- capture saved at {pcap_path}"
         matched = version_name == expected
         return ValidationResult(
             name=validation.name,
             status=ResultStatus.PASS if matched else ResultStatus.FAIL,
             observed=observed,
             expected=expected,
-            message=None if matched else f"Expected {expected}, observed {observed}",
+            message=None if matched else f"Expected {expected}, observed {version_name} ({raw_hex})",
         )
 
     def _run_show(self, driver: BaseSwitchDriver, validation: ValidationStep) -> str:

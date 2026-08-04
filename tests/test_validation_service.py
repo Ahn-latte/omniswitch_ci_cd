@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import switchtest.services.validation_service as validation_service_module
 from switchtest.domain.enums import ResultStatus, ValidationType
 from switchtest.domain.testcase import ValidationStep
@@ -99,7 +101,7 @@ def test_tls_version_validator_passes_when_capture_matches_expected(monkeypatch)
     monkeypatch.setattr(
         validation_service_module,
         "capture_tls_version",
-        lambda interface, target, port, duration: ("TLS 1.2", "0x0303"),
+        lambda interface, target, port, duration: ("TLS 1.2", "0x0303", Path("reports/captures/fake.pcapng")),
     )
     service = ValidationService()
     result = service.run_validation(
@@ -119,7 +121,7 @@ def test_tls_version_validator_fails_when_capture_differs(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "capture_tls_version",
-        lambda interface, target, port, duration: ("TLS 1.0", "0x0301"),
+        lambda interface, target, port, duration: ("TLS 1.0", "0x0301", Path("reports/captures/fake.pcapng")),
     )
     service = ValidationService()
     result = service.run_validation(
