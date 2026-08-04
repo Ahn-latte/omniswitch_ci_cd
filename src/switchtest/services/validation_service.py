@@ -1,3 +1,4 @@
+import os
 import re
 
 from switchtest.domain.enums import ResultStatus, ValidationType
@@ -7,6 +8,7 @@ from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import ValidationExecutionError
 from switchtest.infrastructure.nmap import scan_port
 from switchtest.infrastructure.ping import ping_target
+from switchtest.infrastructure.tls_capture import capture_tls_version
 from switchtest.infrastructure.web_probe import check_web_unreachable
 from switchtest.utils.text import normalize_cli_output
 
@@ -21,6 +23,7 @@ class ValidationService:
             ValidationType.PING: self._validate_ping,
             ValidationType.PORT_CLOSED: self._validate_port_closed,
             ValidationType.WEB_UNREACHABLE: self._validate_web_unreachable,
+            ValidationType.TLS_VERSION: self._validate_tls_version,
         }
         handler = handlers[validation.type]
         return handler(driver, validation)
@@ -108,6 +111,22 @@ class ValidationService:
             message=None
             if unreachable
             else f"Web service on {validation.target}:{validation.port} is still reachable",
+        )
+
+    def _validate_tls_version(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
+        interface = os.environ.get("SWITCHTEST_CAPTURE_INTERFACE", "")
+        version_name, raw_hex = capture_tls_version(
+            interface, validation.target or "", validation.port or 0, duration=validation.timeout
+        )
+        expected = validation.expected or "TLS 1.2"
+        observed = f"{version_name} ({raw_hex})"
+        matched = version_name == expected
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if matched else ResultStatus.FAIL,
+            observed=observed,
+            expected=expected,
+            message=None if matched else f"Expected {expected}, observed {observed}",
         )
 
     def _run_show(self, driver: BaseSwitchDriver, validation: ValidationStep) -> str:

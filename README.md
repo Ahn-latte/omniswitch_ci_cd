@@ -41,6 +41,7 @@ The project currently supports:
   - `ping`
   - `port_closed`
   - `web_unreachable`
+  - `tls_version`
 - JSON reporting,
 - JUnit XML reporting,
 - dry-run mode,
@@ -300,6 +301,34 @@ Supported validation types:
   Runs `nmap -Pn -p <port> <target>` from the automation host and passes when the reported state is anything other than `open` (i.e. `closed` or `filtered`). Use this to confirm at the network level that a service is actually unreachable, as a complement to CLI-reported `disabled` state (e.g. `check_telnet_disabled.yaml` checks `show ip service`, `check_telnet_port_closed.yaml` checks the wire). Requires an `nmap` binary on the machine running `switchtest`. Set `target` (often `$host`, see [Version Templating](#version-templating)) and `port`.
 - `web_unreachable`
   Launches headless Chromium via Playwright and navigates to `http://<target>:<port>/` (or `https://` when `port` is `443`), passing when the navigation itself fails (connection refused/timed out) rather than returning any response. Use this to confirm at the browser/application layer that WebView is actually unreachable once HTTP/HTTPS is disabled (e.g. `check_http_disabled.yaml`/`check_https_enabled.yaml` check `show ip service`, `check_http_web_unreachable.yaml`/`check_https_web_unreachable.yaml` check that a browser can't load the page). Requires the `web` extra (`pip install -e .[web]`) and a one-time `playwright install chromium` on the machine running `switchtest` — that install step needs internet access, but running the check afterwards does not. Set `target` (often `$host`) and `port` (`80` or `443`).
+
+- `tls_version`
+  Captures the switch's actual TLS `ServerHello` with `tshark` (Wireshark's CLI) and passes when the negotiated version matches `expected` (default `"TLS 1.2"`). Unlike the other validation types, this needs a network interface to sniff on — set env var `SWITCHTEST_CAPTURE_INTERFACE` to a value `tshark -D` recognizes (name or index) on the machine running `switchtest`, which must also have permission to capture (typically an admin/elevated shell on Windows, or `CAP_NET_RAW`/root on Linux). Since `tshark` only sees traffic that occurs during its capture window, this validation also triggers the handshake itself — it opens a certificate-verification-skipping TLS connection to `target:port` partway through the capture, so no separate traffic generator is needed. Set `target` (often `$host`) and `port` (e.g. `443` for WebView). Not wired into any suite by default — the interface/capture-permission setup is machine-specific, so add it to a suite once `SWITCHTEST_CAPTURE_INTERFACE` is confirmed working in your environment. See [check_webview_tls_version.yaml](testcases/secfunc/check_webview_tls_version.yaml).
+
+#### `tls_version` setup on Windows
+
+Wireshark's installer doesn't always add itself to `PATH`, so `tshark` (and `tshark -D`, used to list capture interfaces) can fail with `'tshark' is not recognized...` even when Wireshark is installed. Fix it in `cmd`:
+
+```cmd
+REM Confirm tshark.exe exists (adjust if installed elsewhere):
+dir "C:\Program Files\Wireshark\tshark.exe"
+
+REM Add it to PATH for just this cmd window:
+set PATH=%PATH%;C:\Program Files\Wireshark
+tshark -v
+tshark -D
+
+REM Add it to PATH permanently (admin cmd; only affects new cmd windows):
+setx PATH "%PATH%;C:\Program Files\Wireshark" /M
+```
+
+`tshark -D` lists every capture-capable interface, including virtual/unrelated ones (Bluetooth, loopback, remote-capture plugins like `sshdump`/`ciscodump`). Pick the one actually facing the switch — cross-check with `ipconfig` to find which adapter has an IP in the switch's subnet (e.g. `192.168.1.x` for `SWITCH_HOST=192.168.1.1`), then set:
+
+```cmd
+set SWITCHTEST_CAPTURE_INTERFACE=이더넷
+```
+
+(either the interface name as `tshark -D` prints it, e.g. `이더넷`/`Wi-Fi`, or its list number, e.g. `10`, both work with `tshark -i`). Capturing itself needs an elevated/admin `cmd` window even after `tshark -D` succeeds.
 
 Each validation also supports:
 

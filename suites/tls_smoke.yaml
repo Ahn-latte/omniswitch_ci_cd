@@ -1,0 +1,4 @@
+name: tls_smoke
+description: Wire-level TLS version verification (requires tshark + SWITCHTEST_CAPTURE_INTERFACE, admin/elevated shell)
+tests:
+  - ../testcases/secfunc/check_webview_tls_version.yaml

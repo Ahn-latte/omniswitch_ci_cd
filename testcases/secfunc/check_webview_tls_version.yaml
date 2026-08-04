@@ -1,0 +1,17 @@
+id: TC-DP-713
+name: WebView TLS handshake negotiates TLS 1.2
+description: 패킷 캡처(tshark)로 WebView(443) TLS 핸드셰이크가 실제로 TLS 1.2로 협상되는지 확인 (데이터보호 전송구간 암호화, TC-DP-712의 wire-level 검증판)
+feature: system
+tags: [secfunc, transport, network, tls]
+severity: high
+setup: []
+validations:
+  - name: WebView ServerHello가 TLS 1.2 사용
+    type: tls_version
+    target: $host
+    port: 443
+    expected: "TLS 1.2"
+    timeout: 10
+cleanup: []
+continue_on_failure: false
+timeout: 60

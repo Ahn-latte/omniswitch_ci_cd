@@ -9,6 +9,7 @@ class ValidationType(str, Enum):
     PING = "ping"
     PORT_CLOSED = "port_closed"
     WEB_UNREACHABLE = "web_unreachable"
+    TLS_VERSION = "tls_version"
 
 
 class TestAction(str, Enum):
