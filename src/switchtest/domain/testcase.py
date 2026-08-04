@@ -18,6 +18,7 @@ class ValidationStep(BaseModel):
     expected: Optional[str] = None
     pattern: Optional[str] = None
     target: Optional[str] = None
+    port: Optional[int] = None
     timeout: int = 30
     reauth: bool = False
 

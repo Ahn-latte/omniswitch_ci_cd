@@ -1,0 +1,15 @@
+id: TC-CIS-002B
+name: Verify Telnet port is not reachable
+description: Network-level confirmation that TCP/23 does not accept connections, complementing TC-CIS-002's CLI-reported "disabled" state with an actual port scan.
+feature: system
+tags: [cis, system, security, management, network]
+severity: high
+setup: []
+validations:
+  - name: Telnet port 23 is not open
+    type: port_closed
+    target: $host
+    port: 23
+cleanup: []
+continue_on_failure: false
+timeout: 60

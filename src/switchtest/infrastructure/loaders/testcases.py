@@ -18,7 +18,7 @@ def load_testcase(path: Path, variables: dict[str, str] | None = None) -> TestCa
 
 def _apply_variables(payload: dict, variables: dict[str, str]) -> None:
     for validation in payload.get("validations") or []:
-        for field_name in ("expected", "pattern"):
+        for field_name in ("expected", "pattern", "target"):
             value = validation.get(field_name)
             if isinstance(value, str):
                 validation[field_name] = render_template(value, variables)

@@ -5,7 +5,9 @@ from switchtest.domain.results import ValidationResult
 from switchtest.domain.testcase import ValidationStep
 from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import ValidationExecutionError
+from switchtest.infrastructure.nmap import scan_port
 from switchtest.infrastructure.ping import ping_target
+from switchtest.infrastructure.web_probe import check_web_unreachable
 from switchtest.utils.text import normalize_cli_output
 
 
@@ -17,6 +19,8 @@ class ValidationService:
             ValidationType.REGEX: self._validate_regex,
             ValidationType.EQUALS: self._validate_equals,
             ValidationType.PING: self._validate_ping,
+            ValidationType.PORT_CLOSED: self._validate_port_closed,
+            ValidationType.WEB_UNREACHABLE: self._validate_web_unreachable,
         }
         handler = handlers[validation.type]
         return handler(driver, validation)
@@ -77,6 +81,33 @@ class ValidationService:
             observed=output,
             expected=validation.target,
             message=None if success else f"Ping to {validation.target} failed",
+        )
+
+    def _validate_port_closed(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
+        state, output = scan_port(validation.target or "", validation.port or 0, timeout=validation.timeout)
+        closed = state != "open"
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if closed else ResultStatus.FAIL,
+            observed=output,
+            expected=f"port {validation.port} not open",
+            message=None
+            if closed
+            else f"Port {validation.port} on {validation.target} is open (expected closed/filtered)",
+        )
+
+    def _validate_web_unreachable(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
+        unreachable, output = check_web_unreachable(
+            validation.target or "", validation.port or 0, timeout=validation.timeout
+        )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if unreachable else ResultStatus.FAIL,
+            observed=output,
+            expected=f"http(s) on port {validation.port} unreachable",
+            message=None
+            if unreachable
+            else f"Web service on {validation.target}:{validation.port} is still reachable",
         )
 
     def _run_show(self, driver: BaseSwitchDriver, validation: ValidationStep) -> str:

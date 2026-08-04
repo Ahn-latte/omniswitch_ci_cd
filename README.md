@@ -39,6 +39,8 @@ The project currently supports:
   - `regex`
   - `equals`
   - `ping`
+  - `port_closed`
+  - `web_unreachable`
 - JSON reporting,
 - JUnit XML reporting,
 - dry-run mode,
@@ -294,6 +296,10 @@ Supported validation types:
   Passes when normalized output equals normalized expected text.
 - `ping`
   Runs a host-side ping check instead of a switch CLI command.
+- `port_closed`
+  Runs `nmap -Pn -p <port> <target>` from the automation host and passes when the reported state is anything other than `open` (i.e. `closed` or `filtered`). Use this to confirm at the network level that a service is actually unreachable, as a complement to CLI-reported `disabled` state (e.g. `check_telnet_disabled.yaml` checks `show ip service`, `check_telnet_port_closed.yaml` checks the wire). Requires an `nmap` binary on the machine running `switchtest`. Set `target` (often `$host`, see [Version Templating](#version-templating)) and `port`.
+- `web_unreachable`
+  Launches headless Chromium via Playwright and navigates to `http://<target>:<port>/` (or `https://` when `port` is `443`), passing when the navigation itself fails (connection refused/timed out) rather than returning any response. Use this to confirm at the browser/application layer that WebView is actually unreachable once HTTP/HTTPS is disabled (e.g. `check_http_disabled.yaml`/`check_https_enabled.yaml` check `show ip service`, `check_http_web_unreachable.yaml`/`check_https_web_unreachable.yaml` check that a browser can't load the page). Requires the `web` extra (`pip install -e .[web]`) and a one-time `playwright install chromium` on the machine running `switchtest` — that install step needs internet access, but running the check afterwards does not. Set `target` (often `$host`) and `port` (`80` or `443`).
 
 Each validation also supports:
 
@@ -314,9 +320,19 @@ validations:
 
 At run time, `switchtest run` substitutes `$expected_firmware` with the `expected_firmware` value from the `--device` entry in `configs/devices.yaml`. To test a new firmware release, update `expected_firmware` in one place (the device entry) — every testcase that references it picks up the new value automatically, no need to edit `testcases/system/check_firmware.yaml`, `testcases/secfunc/check_firmware_version.yaml`, or any other file by hand.
 
+The same mechanism substitutes `$host` with the device's `host` from `configs/devices.yaml`, so `target` fields (e.g. on a `port_closed` validation) point at whichever device the suite is run against instead of a hardcoded IP:
+
+```yaml
+validations:
+  - name: Telnet port 23 is not open
+    type: port_closed
+    target: $host
+    port: 23
+```
+
 Notes:
-- This only substitutes `expected`/`pattern` fields inside `validations`, not `command` or `setup`/`cleanup` steps.
-- `validate-testcase`/`validate-suite` don't have a device context, so they leave `$expected_firmware` as a literal string — that's expected, it's still valid YAML/schema. Only `run` (which always has a `--device`) performs the substitution.
+- This only substitutes `expected`/`pattern`/`target` fields inside `validations`, not `command` or `setup`/`cleanup` steps.
+- `validate-testcase`/`validate-suite` don't have a device context, so they leave `$expected_firmware`/`$host` as a literal string — that's expected, it's still valid YAML/schema. Only `run` (which always has a `--device`) performs the substitution.
 - If a device has no `expected_firmware` set, `$expected_firmware` resolves to an empty string, so any testcase referencing it will fail its `contains`/`equals` check against that device — set `expected_firmware` on any device you intend to run firmware-version testcases against.
 - Model name (`OS6900-X48C6`, etc.) is not templated because no testcase checks it — it only shows up as informational metadata (`show system` → `Model:` in the summary/report).
 

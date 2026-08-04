@@ -5,8 +5,11 @@ tests:
   - ../testcases/system/check_firmware.yaml
   - ../testcases/cis/check_ssh_enabled.yaml
   - ../testcases/cis/check_telnet_disabled.yaml
+  - ../testcases/cis/check_telnet_port_closed.yaml
   - ../testcases/cis/check_http_disabled.yaml
+  - ../testcases/cis/check_http_web_unreachable.yaml
   - ../testcases/cis/check_https_enabled.yaml
+  - ../testcases/cis/check_https_web_unreachable.yaml
   - ../testcases/cis/check_ntp_configured.yaml
   - ../testcases/cis/check_syslog_configured.yaml
   - ../testcases/cis/check_aaa_configured.yaml

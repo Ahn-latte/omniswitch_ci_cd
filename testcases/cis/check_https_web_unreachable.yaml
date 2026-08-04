@@ -1,0 +1,15 @@
+id: TC-CIS-004B
+name: Verify HTTPS WebView is not reachable in a browser
+description: Browser-level confirmation that port 443 serves nothing once WebView/HTTPS is disabled, complementing TC-CIS-004's CLI-reported service state with an actual navigation attempt.
+feature: system
+tags: [cis, system, security, management, network, web]
+severity: high
+setup: []
+validations:
+  - name: HTTPS WebView on port 443 does not load
+    type: web_unreachable
+    target: $host
+    port: 443
+cleanup: []
+continue_on_failure: false
+timeout: 60

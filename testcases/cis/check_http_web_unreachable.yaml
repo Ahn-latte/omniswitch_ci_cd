@@ -1,0 +1,15 @@
+id: TC-CIS-003B
+name: Verify HTTP WebView is not reachable in a browser
+description: Browser-level confirmation that port 80 serves nothing once HTTP is disabled, complementing TC-CIS-003's CLI-reported service state with an actual navigation attempt.
+feature: system
+tags: [cis, system, security, management, network, web]
+severity: high
+setup: []
+validations:
+  - name: HTTP WebView on port 80 does not load
+    type: web_unreachable
+    target: $host
+    port: 80
+cleanup: []
+continue_on_failure: false
+timeout: 60

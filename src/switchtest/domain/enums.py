@@ -7,6 +7,8 @@ class ValidationType(str, Enum):
     REGEX = "regex"
     EQUALS = "equals"
     PING = "ping"
+    PORT_CLOSED = "port_closed"
+    WEB_UNREACHABLE = "web_unreachable"
 
 
 class TestAction(str, Enum):
