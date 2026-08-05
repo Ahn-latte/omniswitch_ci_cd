@@ -135,3 +135,31 @@ def test_tls_version_validator_fails_when_capture_differs(monkeypatch) -> None:
         ),
     )
     assert result.status == ResultStatus.FAIL
+
+
+def test_tcp_blocked_validator_passes_when_connection_is_dropped(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "probe_tcp",
+        lambda target, port, timeout: (True, "connection to 192.0.2.1:22 timed out after 20s (dropped)"),
+    )
+    service = ValidationService()
+    result = service.run_validation(
+        StubDriver(),
+        ValidationStep(name="ssh blocked", type=ValidationType.TCP_BLOCKED, target="192.0.2.1", port=22),
+    )
+    assert result.status == ResultStatus.PASS
+
+
+def test_tcp_blocked_validator_fails_when_connection_succeeds(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "probe_tcp",
+        lambda target, port, timeout: (False, "connection to 192.0.2.1:22 succeeded in 0.01s"),
+    )
+    service = ValidationService()
+    result = service.run_validation(
+        StubDriver(),
+        ValidationStep(name="ssh blocked", type=ValidationType.TCP_BLOCKED, target="192.0.2.1", port=22),
+    )
+    assert result.status == ResultStatus.FAIL

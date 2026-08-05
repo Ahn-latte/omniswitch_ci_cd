@@ -8,6 +8,7 @@ from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import ValidationExecutionError
 from switchtest.infrastructure.nmap import scan_port
 from switchtest.infrastructure.ping import ping_target
+from switchtest.infrastructure.tcp_probe import probe_tcp
 from switchtest.infrastructure.tls_capture import capture_tls_version
 from switchtest.infrastructure.web_probe import check_web_unreachable
 from switchtest.utils.text import normalize_cli_output
@@ -24,6 +25,7 @@ class ValidationService:
             ValidationType.PORT_CLOSED: self._validate_port_closed,
             ValidationType.WEB_UNREACHABLE: self._validate_web_unreachable,
             ValidationType.TLS_VERSION: self._validate_tls_version,
+            ValidationType.TCP_BLOCKED: self._validate_tcp_blocked,
         }
         handler = handlers[validation.type]
         return handler(driver, validation)
@@ -127,6 +129,16 @@ class ValidationService:
             observed=observed,
             expected=expected,
             message=None if matched else f"Expected {expected}, observed {version_name} ({raw_hex})",
+        )
+
+    def _validate_tcp_blocked(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
+        blocked, detail = probe_tcp(validation.target or "", validation.port or 0, timeout=validation.timeout)
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if blocked else ResultStatus.FAIL,
+            observed=detail,
+            expected=f"tcp/{validation.port} on {validation.target} unreachable from this host",
+            message=None if blocked else f"Expected the connection to be blocked, but {detail}",
         )
 
     def _run_show(self, driver: BaseSwitchDriver, validation: ValidationStep) -> str:

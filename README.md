@@ -42,6 +42,7 @@ The project currently supports:
   - `port_closed`
   - `web_unreachable`
   - `tls_version`
+  - `tcp_blocked`
 - JSON reporting,
 - JUnit XML reporting,
 - dry-run mode,
@@ -318,6 +319,8 @@ Supported validation types:
   Captures the switch's actual TLS `ServerHello` with `tshark` (Wireshark's CLI) and passes when the negotiated version matches `expected` (default `"TLS 1.2"`). Unlike the other validation types, this needs a network interface to sniff on — set env var `SWITCHTEST_CAPTURE_INTERFACE` to a value `tshark -D` recognizes (name or index) on the machine running `switchtest`, which must also have permission to capture (typically an admin/elevated shell on Windows, or `CAP_NET_RAW`/root on Linux). Since `tshark` only sees traffic that occurs during its capture window, this validation also triggers the handshake itself — it opens a certificate-verification-skipping TLS connection to `target:port` partway through the capture, so no separate traffic generator is needed. Set `target` (often `$host`) and `port` (e.g. `443` for WebView). Not wired into any suite by default — the interface/capture-permission setup is machine-specific, so add it to a suite once `SWITCHTEST_CAPTURE_INTERFACE` is confirmed working in your environment. See [check_webview_tls_version.yaml](testcases/secfunc/check_webview_tls_version.yaml).
 
   Every run keeps its evidence — the `.pcapng` (openable directly in Wireshark) and a human-readable `-V` dissection of the `ServerHello` packet (`.txt`, same name) are both saved to `reports/captures/` (gitignored, one pair per run, named `tls_<target>_<port>_<UTC timestamp>.pcapng`/`.txt`) regardless of pass/fail. The saved `.pcapng` path is also included in the validation's `observed` field in the JSON/console report, so it's traceable back from a specific test run's result.
+- `tcp_blocked`
+  Opens a plain TCP connection to `target:port` from the machine running `switchtest` and passes when it *can't* be established — dropped (timeout) or refused. Use it to confirm that this host is being blocked at the network level, e.g. after an IP ban ([check_ip_ban_enforcement_ssh.yaml](testcases/secfunc/check_ip_ban_enforcement_ssh.yaml) uses it to show that a banned source IP can no longer reach tcp/22, which is what `ssh_dispatch_run_fatal: ... Connection timed out` looks like from the client side). Distinct from `port_closed`, which asks nmap whether a service is listening at all; this asks whether *this machine* can still reach a service that is otherwise up. Set `target` (often `$host`), `port`, and `timeout` (how long to wait before calling it dropped). No external tools needed.
 
 #### `tls_version` setup on Windows
 
@@ -415,7 +418,7 @@ tests:
 | `suite8.yaml` | 8.x | Audit |
 | `secfunc_auto.yaml` | 5.x / 8.x | Boot self-test and audit-generation checks runnable under the normal admin device (overlaps `suite5`/`suite8`; not yet consolidated) |
 | `secfunc_lowpriv.yaml` | 8.4.1 | Audit access-restriction check — **must** run with `--device lowpriv`, never an admin account, or the check is meaningless |
-| `secfunc_lockout.yaml` | 1.3.3 | Account-lockout *enforcement* check — **must** run with `--device secureadmin`. It locks `admin1`, so it can't be connected as `admin1` (that would lock its own session), and reading swlog needs secureadmin |
+| `secfunc_lockout.yaml` | 1.3.3 / 1.3.4 | Account-lockout and IP-ban *enforcement* checks — **must** run with `--device secureadmin`. They lock `admin1`, so the suite can't be connected as `admin1` (that would lock its own session), and reading swlog needs secureadmin. The IP-ban testcase bans this machine's own IP; see [Example 5](#example-5-run-the-account-lockout-and-ip-ban-enforcement-checks) |
 
 ## Example Workflows
 
@@ -468,18 +471,23 @@ $env:SWITCH_OS6870_USER1_PASSWORD = "..."
 venv\Scripts\switchtest run --device lowpriv --suite suites\secfunc_lowpriv.yaml --report-dir reports --json reports\secfunc_841_result.json
 ```
 
-### Example 5: Run the account-lockout enforcement check
-
-Deliberately fails 3 SSH logins as `admin1` to confirm the account really locks, verifies it from a `secureadmin` session (`show user admin1`, `show log swlog`), then unlocks `admin1` again:
+### Example 5: Run the account-lockout and IP-ban enforcement checks
 
 ```cmd
 set SWITCH_SECUREADMIN_PASSWORD=...
 venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_lockout.yaml --report-dir reports --json reports\secfunc_133_result.json
 ```
 
+Two testcases run in order:
+
+- **TC-IA-133** deliberately fails 3 SSH logins as `admin1` to confirm the *account* really locks, verifies it from the `secureadmin` session (`show user admin1`, `show log swlog`), then unlocks `admin1` again.
+- **TC-IA-134** fails 6 logins to confirm the *source IP* gets banned — a separate mechanism that blocks the whole IP regardless of account — verifies tcp/22 is now unreachable from this host (`tcp_blocked`) plus the `Banning ...` swlog entry, then runs `aaa switch-access banned-ip all release`.
+
 `--device secureadmin` is required: the account under test (`admin1`) can't also be the one holding the session that observes and unlocks it.
 
-This testcase also brackets itself with `aaa switch-access ip-lockout-threshold` (setup raises it to `15`, cleanup restores `6`). That threshold is IP-address-level, not per-account, so this testcase's own 3 failures count against it independently of anything else — `omniswitch_api_poc`'s API/WebView equivalents of this same check (`test_lockout_enforcement_api.py`/`test_lockout_enforcement_webview.py`) bracket themselves the same way, so all three are self-contained and safe to run alone, in any order, or repeatedly.
+⚠️ **TC-IA-134 bans the machine you run it from.** It only works because the `secureadmin` SSH session is already open when the ban lands — an IP ban blocks *new* connections, not established ones — so the validations and the `banned-ip all release` cleanup still get through. If that cleanup doesn't run (process killed mid-test, connection lost), the IP stays banned and nothing can reconnect; release it from the switch console with `aaa switch-access banned-ip all release`.
+
+TC-IA-133 brackets itself with `aaa switch-access ip-lockout-threshold` (setup raises it to `15`, cleanup restores `6`) so its own 3 failures can't trip the IP ban as a side effect; TC-IA-134 pins the threshold to `6` in setup because tripping that ban is exactly what it's testing. `omniswitch_api_poc`'s API/WebView equivalents of both checks manage the threshold the same way, so every one of them is self-contained and safe to run alone, in any order, or repeatedly.
 
 Before relying on this check, confirm one `attempt_login()` registers as exactly one bad attempt on the switch (SSH libraries can negotiate several auth methods per connection, which the switch may count separately):
 

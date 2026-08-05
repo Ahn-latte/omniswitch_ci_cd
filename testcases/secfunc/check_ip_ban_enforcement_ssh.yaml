@@ -1,0 +1,52 @@
+id: TC-IA-134
+name: SSH IP ban actually triggers at the IP lockout threshold
+description: >-
+  admin1 계정으로 SSH 로그인을 임계값(aaa switch-access ip-lockout-threshold, 여기서는 6회)까지
+  연속 실패시켜 계정 잠금(3회)을 넘어 IP 자체가 차단되는지 검증. 계정 단위 잠금을 보는 TC-IA-133과
+  달리, 계정과 무관하게 출발지 IP 전체가 막히는 동작을 확인함 - 차단 후에는 이 장비에서 나가는 신규
+  접속이 SSH/API/WebView 모두 드롭되므로(연결 타임아웃), tcp_blocked 검증으로 22번 포트 재접속이
+  막혔음을 확인하고 감사로그에서 Banning 기록을 확인함.
+
+  반드시 --device secureadmin 으로 실행할 것. 이 시험이 성립하는 이유는 secureadmin SSH 세션이
+  차단 발생 *이전에* 이미 열려 있기 때문 - IP 차단은 신규 연결만 막고 기존 세션은 유지되므로, 검증과
+  클린업(banned-ip release / user unlock)을 그 세션으로 수행할 수 있음. admin1(ACSSW01)로 돌리면
+  접속 계정을 스스로 잠그는 모순이 되고 swlog 열람 권한도 없음.
+
+  경고: cleanup이 실행되지 않은 채(예: 프로세스 강제 종료) 끝나면 이 장비의 IP가 차단된 상태로 남아
+  이후 어떤 접속도 불가능해짐. 그 경우 콘솔에서
+  aaa switch-access banned-ip all release 로 해제할 것.
+feature: system
+tags: [secfunc, ia, audit, required, secureadmin]
+severity: high
+setup:
+  # Pin the threshold so the attempt count below is deterministic regardless
+  # of what a previous testcase left configured (TC-IA-133 raises it to 15).
+  - action: cli
+    commands:
+      - aaa switch-access ip-lockout-threshold 6
+  - action: ensure_unlocked
+    username: admin1
+  - action: trigger_failed_logins
+    username: admin1
+    wrong_password: "definitely-wrong-Passw0rd!1"
+    attempts: 6
+validations:
+  - name: IP 차단으로 SSH 신규 접속 불가 (tcp/22 드롭)
+    type: tcp_blocked
+    target: $host
+    port: 22
+    timeout: 20
+  - name: 감사로그에 IP 차단 기록
+    type: regex
+    command: show log swlog | grep -i banning
+    pattern: 'Login attempt from station reached max threshold'
+    timeout: 90
+    reauth: true
+cleanup:
+  - action: cli
+    commands:
+      - aaa switch-access banned-ip all release
+  - action: ensure_unlocked
+    username: admin1
+continue_on_failure: false
+timeout: 300
