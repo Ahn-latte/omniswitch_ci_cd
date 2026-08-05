@@ -5,11 +5,21 @@ description: >-
   show user admin1 확인)와 감사로그(show log swlog)에 기록되는지 확인. 잠금 임계값/시간 "설정값"만
   확인하는 TC-IA-131/TC-IA-132와 달리, 잠금이 실제로 동작하는지(behavioral) 검증. 시험 종료 후 admin1
   계정 잠금 해제. 반드시 --device secureadmin 으로 실행할 것 - ACSSW01(admin1)로 돌리면 접속에 쓰는
-  계정을 스스로 잠그는 모순이 되고, swlog 열람도 secureadmin 권한이 필요함.
+  계정을 스스로 잠그는 모순이 되고, swlog 열람도 secureadmin 권한이 필요함. IP 단위 잠금 임계값을
+  일시적으로 올렸다가 시험 종료 후 원복함 - 이 시험(및 순차 실행되는 API/WebView 대응 시험)이 만드는
+  실패 로그인이 계정과 무관하게 IP 단위로도 집계되기 때문.
 feature: system
 tags: [secfunc, ia, audit, required, secureadmin]
 severity: high
 setup:
+  # aaa switch-access ip-lockout-threshold is IP-address-level, not
+  # per-account, so it also counts these deliberate failures (and the API/
+  # WebView equivalents of this test, run back to back against the same
+  # switch). Raise it here so 3 failed admin1 logins can't trip an IP-level
+  # lockout on top of the account-level one under test; restored in cleanup.
+  - action: cli
+    commands:
+      - aaa switch-access ip-lockout-threshold 8
   # Start from a known-unlocked state: a previous run that died before its
   # cleanup would otherwise leave admin1 locked, and this test would then
   # "pass" on the leftover lockout without proving anything.
@@ -31,6 +41,9 @@ validations:
     timeout: 90
     reauth: true
 cleanup:
+  - action: cli
+    commands:
+      - aaa switch-access ip-lockout-threshold 6
   - action: ensure_unlocked
     username: admin1
 continue_on_failure: false
