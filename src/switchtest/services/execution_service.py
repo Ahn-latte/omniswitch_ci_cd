@@ -105,5 +105,17 @@ class ExecutionService:
                 if not context.dry_run:
                     self.driver.apply_config(["write memory"])
                 continue
+            if step.action == TestAction.TRIGGER_FAILED_LOGINS:
+                username = step.username or ""
+                if not username:
+                    raise CommandExecutionError("trigger_failed_logins requires a username")
+                if context.dry_run:
+                    command_log.append(f"DRY_RUN trigger_failed_logins user={username} attempts={step.attempts}")
+                    continue
+                for attempt in range(1, step.attempts + 1):
+                    succeeded = self.driver.attempt_login(username, step.wrong_password or "")
+                    outcome = "unexpected SUCCESS" if succeeded else "rejected as expected"
+                    command_log.append(f"FAILED_LOGIN_ATTEMPT {username} #{attempt}: {outcome}")
+                continue
         if context.device_state == DeviceSafetyState.UNSAFE:
             raise CleanupError("Device is in unsafe state")

@@ -6,4 +6,5 @@ tests:
   - ../testcases/secfunc/check_password_policy_enforcement_change.yaml
   - ../testcases/secfunc/check_lockout_threshold.yaml
   - ../testcases/secfunc/check_lockout_duration.yaml
+  - ../testcases/secfunc/check_lockout_enforcement_ssh.yaml
   - ../testcases/secfunc/check_weak_algo_blocked.yaml

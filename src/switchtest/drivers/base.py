@@ -28,3 +28,13 @@ class BaseSwitchDriver(ABC):
 
     @abstractmethod
     def get_metadata(self) -> dict[str, str | None]: ...
+
+    @abstractmethod
+    def attempt_login(self, username: str, password: str, timeout: int = 15) -> bool:
+        """Open a fresh, separate session with the given credentials (not the
+        driver's own session) and immediately close it. Returns True if
+        authentication succeeded, False if it was rejected. Used to trigger
+        failed-login attempts against an account other than the one the
+        driver is already authenticated as, e.g. for lockout-enforcement
+        testcases."""
+        ...

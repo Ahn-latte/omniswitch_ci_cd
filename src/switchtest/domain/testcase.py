@@ -9,6 +9,9 @@ class TestStep(BaseModel):
     action: TestAction
     commands: list[str] = Field(default_factory=list)
     seconds: Optional[int] = None
+    username: Optional[str] = None
+    wrong_password: Optional[str] = None
+    attempts: int = 3
 
 
 class ValidationStep(BaseModel):

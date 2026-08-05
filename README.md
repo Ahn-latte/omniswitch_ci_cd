@@ -283,6 +283,15 @@ continue_on_failure: false
 timeout: 60
 ```
 
+`setup`/`cleanup` steps support these `action` types:
+
+- `cli` — runs `commands` (a list of CLI strings) against the device.
+- `wait` — sleeps `seconds`.
+- `save_config` — runs `write memory`.
+- `restore_baseline` — restores the device's configured baseline.
+- `reboot` — not implemented (raises an error if used).
+- `trigger_failed_logins` — attempts `attempts` (default `3`) SSH logins as `username` with `wrong_password`, each expected to be rejected, without disturbing the testcase's own already-authenticated session. Used to trigger lockout-enforcement behavior for testcases like [check_lockout_enforcement_ssh.yaml](testcases/secfunc/check_lockout_enforcement_ssh.yaml), which then validates the lockout actually took effect (`show user <username>`) and was audit-logged (`show log swlog`), as opposed to [check_lockout_threshold.yaml](testcases/secfunc/check_lockout_threshold.yaml)/[check_lockout_duration.yaml](testcases/secfunc/check_lockout_duration.yaml), which only check the lockout threshold/duration *configuration*, not that a real lockout actually happens.
+
 ## Validation Types
 
 Supported validation types:

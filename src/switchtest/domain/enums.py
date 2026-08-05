@@ -18,6 +18,7 @@ class TestAction(str, Enum):
     SAVE_CONFIG = "save_config"
     RESTORE_BASELINE = "restore_baseline"
     REBOOT = "reboot"
+    TRIGGER_FAILED_LOGINS = "trigger_failed_logins"
 
 
 class Severity(str, Enum):

@@ -5,6 +5,7 @@ import time
 from switchtest.domain.device import DeviceDefinition
 from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import BaselineRestoreError, CommandExecutionError
+from switchtest.exceptions import ConnectionError as SwitchConnectionError
 from switchtest.infrastructure.secrets import get_optional_secret, get_required_secret
 from switchtest.infrastructure.ssh.client import SSHTransport
 from switchtest.infrastructure.ssh.prompt import PASSWORD_PROMPT_PATTERN, is_password_prompt
@@ -111,6 +112,23 @@ class AOSSwitchDriver(BaseSwitchDriver):
             "firmware_version": _extract_firmware(version_output),
             "device_model": _extract_model(version_output),
         }
+
+    def attempt_login(self, username: str, password: str, timeout: int = 15) -> bool:
+        transport = SSHTransport(
+            host=self.device.host,
+            port=self.device.port,
+            auth_username=username,
+            auth_password=password,
+            timeout_socket=timeout,
+            timeout_ops=timeout,
+            auth_strict_key=self.device.strict_host_key,
+        )
+        try:
+            transport.connect()
+        except SwitchConnectionError:
+            return False
+        transport.close()
+        return True
 
     def _transport(self) -> SSHTransport:
         if self.transport is None:
