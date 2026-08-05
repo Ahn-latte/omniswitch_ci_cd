@@ -7,10 +7,10 @@ description: >-
   계정 잠금 해제. 반드시 --device secureadmin 으로 실행할 것 - ACSSW01(admin1)로 돌리면 접속에 쓰는
   계정을 스스로 잠그는 모순이 되고, swlog 열람도 secureadmin 권한이 필요함.
 
-  IP 단위 잠금 임계값(aaa switch-access ip-lockout-threshold)을 setup에서 10으로 올렸다가
+  IP 단위 잠금 임계값(aaa switch-access ip-lockout-threshold)을 setup에서 15로 올렸다가
   cleanup에서 6으로 복구함 - 이 시험 자신의 admin1 실패 3회가 계정과 무관한 IP 단위 카운터에도
   잡혀서, 다른 트랜스포트(API/WebView) 시험과 무관하게 이 시험 단독으로도 IP 잠금을 유발할 수 있기
-  때문. (omniswitch_api_poc의 API/WebView 대응 시험도 각자 동일하게 자체적으로 10/6을 관리함 -
+  때문. (omniswitch_api_poc의 API/WebView 대응 시험도 각자 동일하게 자체적으로 15/6을 관리함 -
   세 시험이 서로의 순서에 의존하지 않도록 독립적으로 자기 완결적임.)
 feature: system
 tags: [secfunc, ia, audit, required, secureadmin]
@@ -21,7 +21,7 @@ setup:
   # one under test. Restored in cleanup.
   - action: cli
     commands:
-      - aaa switch-access ip-lockout-threshold 10
+      - aaa switch-access ip-lockout-threshold 15
   # Start from a known-unlocked state: a previous run that died before its
   # cleanup would otherwise leave admin1 locked, and this test would then
   # "pass" on the leftover lockout without proving anything.
