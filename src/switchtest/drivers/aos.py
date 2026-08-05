@@ -126,6 +126,10 @@ class AOSSwitchDriver(BaseSwitchDriver):
         try:
             transport.connect()
         except SwitchConnectionError:
+            # connect() assigns the underlying driver before opening it, so a
+            # rejected login still leaves an object holding a socket -- close
+            # it rather than leaking one per failed attempt.
+            transport.close()
             return False
         transport.close()
         return True
