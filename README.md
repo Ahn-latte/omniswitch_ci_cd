@@ -479,7 +479,7 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_lockout.
 
 `--device secureadmin` is required: the account under test (`admin1`) can't also be the one holding the session that observes and unlocks it.
 
-This testcase also brackets itself with `aaa switch-access ip-lockout-threshold` (setup raises it to `8`, cleanup restores `6`). That threshold is IP-address-level, not per-account, so it also counts these deliberate failures — and if `omniswitch_api_poc`'s API/WebView equivalents of this same check (`test_lockout_enforcement_api.py`/`test_lockout_enforcement_webview.py`) run back to back against the same switch from the same machine, all three share one IP-level budget. Without headroom, any one of them could trip an IP-level lockout blocking the whole IP, not just `admin1`.
+This testcase also brackets itself with `aaa switch-access ip-lockout-threshold` (setup raises it to `10`, cleanup restores `6`). That threshold is IP-address-level, not per-account, so this testcase's own 3 failures count against it independently of anything else — `omniswitch_api_poc`'s API/WebView equivalents of this same check (`test_lockout_enforcement_api.py`/`test_lockout_enforcement_webview.py`) bracket themselves the same way, so all three are self-contained and safe to run alone, in any order, or repeatedly.
 
 Before relying on this check, confirm one `attempt_login()` registers as exactly one bad attempt on the switch (SSH libraries can negotiate several auth methods per connection, which the switch may count separately):
 
