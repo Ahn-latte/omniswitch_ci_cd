@@ -1,3 +1,4 @@
+import re
 import time
 
 from switchtest.domain.enums import DeviceSafetyState, ResultStatus, TestAction
@@ -104,6 +105,23 @@ class ExecutionService:
                 command_log.append("SAVE_CONFIG")
                 if not context.dry_run:
                     self.driver.apply_config(["write memory"])
+                continue
+            if step.action == TestAction.ENSURE_UNLOCKED:
+                username = step.username or ""
+                if not username:
+                    raise CommandExecutionError("ensure_unlocked requires a username")
+                if context.dry_run:
+                    command_log.append(f"DRY_RUN ensure_unlocked user={username}")
+                    continue
+                # Check before unlocking: `user <name> unlock` on an account
+                # that isn't locked can come back with an error, which
+                # apply_config would (rightly) treat as a failed command.
+                output = self.driver.run_show(f"show user {username}")
+                if re.search(r"Account lockout\s*=\s*Yes", output):
+                    self.driver.apply_config([f"user {username} unlock"])
+                    command_log.append(f"ENSURE_UNLOCKED {username}: was locked, now unlocked")
+                else:
+                    command_log.append(f"ENSURE_UNLOCKED {username}: already unlocked")
                 continue
             if step.action == TestAction.TRIGGER_FAILED_LOGINS:
                 username = step.username or ""

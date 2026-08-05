@@ -6,8 +6,10 @@ from switchtest.services.validation_service import ValidationService
 
 
 class StubDriver:
-    def __init__(self) -> None:
+    def __init__(self, locked: bool = False) -> None:
         self.login_attempts: list[tuple[str, str]] = []
+        self.applied_commands: list[str] = []
+        self.locked = locked
 
     def connect(self) -> None: ...
     def disconnect(self) -> None: ...
@@ -16,9 +18,12 @@ class StubDriver:
     def exit_config_mode(self) -> None: ...
 
     def run_show(self, command: str, timeout: int = 30, reauth: bool = False) -> str:
+        if command.startswith("show user"):
+            return f"Account lockout     = {'Yes' if self.locked else 'No'},"
         return ""
 
     def apply_config(self, commands: list[str], timeout: int = 30) -> list[str]:
+        self.applied_commands.extend(commands)
         return []
 
     def restore_baseline(self, source: str | None = None) -> None: ...
@@ -68,3 +73,33 @@ def test_trigger_failed_logins_dry_run_does_not_call_driver() -> None:
 
     assert driver.login_attempts == []
     assert any("DRY_RUN trigger_failed_logins" in line for line in result.command_log)
+
+
+def _ensure_unlocked_case() -> TestCaseDefinition:
+    return TestCaseDefinition(
+        id="TC-TEST-3",
+        name="ensure unlocked",
+        description="",
+        feature="system",
+        setup=[TestStep(action=TestAction.ENSURE_UNLOCKED, username="admin1")],
+    )
+
+
+def test_ensure_unlocked_unlocks_a_locked_account() -> None:
+    driver = StubDriver(locked=True)
+    service = ExecutionService(driver=driver, validation_service=ValidationService())
+
+    result = service.run_test(_context(), _ensure_unlocked_case())
+
+    assert driver.applied_commands == ["user admin1 unlock"]
+    assert any("was locked, now unlocked" in line for line in result.command_log)
+
+
+def test_ensure_unlocked_leaves_an_unlocked_account_alone() -> None:
+    driver = StubDriver(locked=False)
+    service = ExecutionService(driver=driver, validation_service=ValidationService())
+
+    result = service.run_test(_context(), _ensure_unlocked_case())
+
+    assert driver.applied_commands == []
+    assert any("already unlocked" in line for line in result.command_log)

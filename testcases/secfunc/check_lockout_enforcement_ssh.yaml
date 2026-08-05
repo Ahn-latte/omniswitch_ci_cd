@@ -10,6 +10,11 @@ feature: system
 tags: [secfunc, ia, audit, required, secureadmin]
 severity: high
 setup:
+  # Start from a known-unlocked state: a previous run that died before its
+  # cleanup would otherwise leave admin1 locked, and this test would then
+  # "pass" on the leftover lockout without proving anything.
+  - action: ensure_unlocked
+    username: admin1
   - action: trigger_failed_logins
     username: admin1
     wrong_password: "definitely-wrong-Passw0rd!1"
@@ -26,8 +31,7 @@ validations:
     timeout: 90
     reauth: true
 cleanup:
-  - action: cli
-    commands:
-      - user admin1 unlock
+  - action: ensure_unlocked
+    username: admin1
 continue_on_failure: false
 timeout: 180

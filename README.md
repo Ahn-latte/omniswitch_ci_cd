@@ -292,6 +292,9 @@ timeout: 60
 - `reboot` — not implemented (raises an error if used).
 - `trigger_failed_logins` — attempts `attempts` (default `3`) SSH logins as `username` with `wrong_password`, each expected to be rejected, without disturbing the testcase's own already-authenticated session. Used to trigger lockout-enforcement behavior for testcases like [check_lockout_enforcement_ssh.yaml](testcases/secfunc/check_lockout_enforcement_ssh.yaml), which then validates the lockout actually took effect (`show user <username>`) and was audit-logged (`show log swlog`), as opposed to [check_lockout_threshold.yaml](testcases/secfunc/check_lockout_threshold.yaml)/[check_lockout_duration.yaml](testcases/secfunc/check_lockout_duration.yaml), which only check the lockout threshold/duration *configuration*, not that a real lockout actually happens.
 
+  Every rejected attempt counts against that account's lockout threshold on the switch, so keep `attempts` at the minimum the test needs — and never wrap login attempts in retry/fallback logic, which burns the budget several times faster than intended.
+- `ensure_unlocked` — runs `show user <username>` and issues `user <username> unlock` only if it reports `Account lockout = Yes`. Put it in `setup` as well as `cleanup`: a run that dies before its cleanup leaves the account locked, and the next run would otherwise "pass" on the leftover lockout without proving anything. It checks first rather than unlocking unconditionally because `user <name> unlock` against an unlocked account can return an error, which `cli` steps treat as a failed command.
+
 ## Validation Types
 
 Supported validation types:

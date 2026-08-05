@@ -19,6 +19,7 @@ class TestAction(str, Enum):
     RESTORE_BASELINE = "restore_baseline"
     REBOOT = "reboot"
     TRIGGER_FAILED_LOGINS = "trigger_failed_logins"
+    ENSURE_UNLOCKED = "ensure_unlocked"
 
 
 class Severity(str, Enum):
