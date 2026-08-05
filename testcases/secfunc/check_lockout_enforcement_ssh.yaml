@@ -4,9 +4,10 @@ description: >-
   admin1 계정으로 SSH 접속 시 잘못된 비밀번호 3회 입력 후 실제로 계정이 잠기는지(secureadmin 세션으로
   show user admin1 확인)와 감사로그(show log swlog)에 기록되는지 확인. 잠금 임계값/시간 "설정값"만
   확인하는 TC-IA-131/TC-IA-132와 달리, 잠금이 실제로 동작하는지(behavioral) 검증. 시험 종료 후 admin1
-  계정 잠금 해제.
+  계정 잠금 해제. 반드시 --device secureadmin 으로 실행할 것 - ACSSW01(admin1)로 돌리면 접속에 쓰는
+  계정을 스스로 잠그는 모순이 되고, swlog 열람도 secureadmin 권한이 필요함.
 feature: system
-tags: [secfunc, ia, audit, required]
+tags: [secfunc, ia, audit, required, secureadmin]
 severity: high
 setup:
   - action: trigger_failed_logins

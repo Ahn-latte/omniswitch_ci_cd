@@ -26,3 +26,18 @@ devices:
     connection_timeout: 15
     command_timeout: 30
     strict_host_key: false
+
+  # Audit/verification account. Needed by testcases that must observe another
+  # account's state (e.g. TC-IA-133 locks admin1, so it cannot itself be
+  # connected as admin1) and by swlog reads, which are secureadmin-only.
+  - name: secureadmin
+    host: 192.168.1.1
+    port: 22
+    username: secureadmin
+    password_env: SWITCH_SECUREADMIN_PASSWORD
+    platform: aos
+    expected_prompt: "->"
+    tags: [lab, secfunc, audit]
+    connection_timeout: 15
+    command_timeout: 30
+    strict_host_key: false

@@ -15,8 +15,12 @@ Expected delta: exactly 1.
 Leaves admin1 unlocked on exit (a single attempt shouldn't lock it, but the
 unlock runs regardless in case the counter was already near the threshold).
 
+Connects as secureadmin (not admin1) for the same reason TC-IA-133 does: the
+account being locked can't be the one holding the observing session, and
+reading admin1's state is a secureadmin-level operation.
+
 Usage (cmd), from the omniswitch_ci_cd directory:
-    set SWITCH_SW1_PASSWORD=...
+    set SWITCH_SECUREADMIN_PASSWORD=...
     venv\\Scripts\\python.exe scripts\\verify_failed_login_counting.py
 """
 
@@ -29,7 +33,7 @@ from switchtest.infrastructure.loaders.devices import load_device_by_name
 
 TARGET_USER = "admin1"
 WRONG_PASSWORD = "definitely-wrong-Passw0rd!1"
-DEVICE_NAME = "ACSSW01"
+DEVICE_NAME = "secureadmin"
 DEVICES_FILE = Path("configs/devices.yaml")
 
 

@@ -412,6 +412,7 @@ tests:
 | `suite8.yaml` | 8.x | Audit |
 | `secfunc_auto.yaml` | 5.x / 8.x | Boot self-test and audit-generation checks runnable under the normal admin device (overlaps `suite5`/`suite8`; not yet consolidated) |
 | `secfunc_lowpriv.yaml` | 8.4.1 | Audit access-restriction check — **must** run with `--device lowpriv`, never an admin account, or the check is meaningless |
+| `secfunc_lockout.yaml` | 1.3.3 | Account-lockout *enforcement* check — **must** run with `--device secureadmin`. It locks `admin1`, so it can't be connected as `admin1` (that would lock its own session), and reading swlog needs secureadmin |
 
 ## Example Workflows
 
@@ -463,6 +464,26 @@ Requires the `lowpriv` device account to already exist on the switch, and its pa
 $env:SWITCH_OS6870_USER1_PASSWORD = "..."
 venv\Scripts\switchtest run --device lowpriv --suite suites\secfunc_lowpriv.yaml --report-dir reports --json reports\secfunc_841_result.json
 ```
+
+### Example 5: Run the account-lockout enforcement check
+
+Deliberately fails 3 SSH logins as `admin1` to confirm the account really locks, verifies it from a `secureadmin` session (`show user admin1`, `show log swlog`), then unlocks `admin1` again:
+
+```cmd
+set SWITCH_SECUREADMIN_PASSWORD=...
+venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_lockout.yaml --report-dir reports --json reports\secfunc_133_result.json
+```
+
+`--device secureadmin` is required: the account under test (`admin1`) can't also be the one holding the session that observes and unlocks it.
+
+Before relying on this check, confirm one `attempt_login()` registers as exactly one bad attempt on the switch (SSH libraries can negotiate several auth methods per connection, which the switch may count separately):
+
+```cmd
+set SWITCH_SECUREADMIN_PASSWORD=...
+venv\Scripts\python.exe scripts\verify_failed_login_counting.py
+```
+
+It reads `admin1`'s `Password bad attempts` counter, makes a single failed login, and reports the delta — expected `1`.
 
 ## How To Add A New Testcase
 
