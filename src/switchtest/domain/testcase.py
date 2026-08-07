@@ -52,6 +52,9 @@ class ValidationStep(BaseModel):
     # For port_scan_closed: how many of the most common ports to scan, per
     # protocol (so 100 means 100 TCP + 100 UDP).
     top_ports: int = 100
+    # For api_unreachable: the HTTP path to request. Keep it credential-free --
+    # a request to the auth endpoint would count as a login attempt.
+    path: str = "/"
     oid: Optional[str] = None
     value: Optional[str] = None
     value_type: str = "s"

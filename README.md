@@ -42,6 +42,7 @@ The project currently supports:
   - `port_closed`
   - `port_scan_closed`
   - `web_unreachable`
+  - `api_unreachable`
   - `tls_version`
   - `tcp_blocked`
   - `snmp_get`
@@ -368,6 +369,12 @@ Supported validation types:
 - `web_unreachable`
   Launches headless Chromium via Playwright and navigates to `http://<target>:<port>/` (or `https://` when `port` is `443`), passing when the navigation itself fails (connection refused/timed out) rather than returning any response. Use this to confirm at the browser/application layer that WebView is actually unreachable once HTTP/HTTPS is disabled (e.g. `check_http_disabled.yaml`/`check_https_enabled.yaml` check `show ip service`, `check_http_web_unreachable.yaml`/`check_https_web_unreachable.yaml` check that a browser can't load the page). Requires the `web` extra (`pip install -e .[web]`) and a one-time `playwright install chromium` on the machine running `switchtest` — that install step needs internet access, but running the check afterwards does not. Set `target` (often `$host`) and `port` (`80` or `443`).
 
+- `api_unreachable`
+  Makes a real HTTP(S) request to `target:port` + `path` and passes when it can't be completed — timed out, refused, or the TLS handshake never happened. The API counterpart of `web_unreachable`: that one proves a *browser* can't load WebView, this one proves an *API client* can't reach it. On this device they are the same 443 listener, but a testcase claiming "every management path is down" should show evidence per path, and only this one appears in a report as "the API request failed". Uses the standard library (`http.client`), so unlike `web_unreachable` it needs no extra install. Any answer counts as reachable — a `401` still proves the service is up.
+
+  `path` defaults to `/` and should stay credential-free: a request to the auth endpoint would count as a failed login against that account's lockout threshold, which is exactly the budget the lockout testcases are careful not to spend. Certificate validity is not checked (the switch is self-signed; use `tls_version` for that) — reachability is the question.
+
+  Note that after `ip service ... disable` the switch usually has no listener at all, so this reports `connection refused` rather than a timeout; both count as unreachable and the result's `observed` records which it was. A true timeout is what an IP-level *ban* looks like — see `tcp_blocked`.
 - `tls_version`
   Captures the switch's actual TLS `ServerHello` with `tshark` (Wireshark's CLI) and passes when the negotiated version matches `expected` (default `"TLS 1.2"`). Unlike the other validation types, this needs a network interface to sniff on — set env var `SWITCHTEST_CAPTURE_INTERFACE` to a value `tshark -D` recognizes (name or index) on the machine running `switchtest`, which must also have permission to capture (typically an admin/elevated shell on Windows, or `CAP_NET_RAW`/root on Linux). Since `tshark` only sees traffic that occurs during its capture window, this validation also triggers the handshake itself — it opens a certificate-verification-skipping TLS connection to `target:port` partway through the capture, so no separate traffic generator is needed. Set `target` (often `$host`) and `port` (e.g. `443` for WebView). Not wired into any suite by default — the interface/capture-permission setup is machine-specific, so add it to a suite once `SWITCHTEST_CAPTURE_INTERFACE` is confirmed working in your environment. See [check_webview_tls_version.yaml](testcases/secfunc/check_webview_tls_version.yaml).
 
@@ -432,6 +439,7 @@ Each validation also supports:
 - `timeout` — per-command timeout in seconds (default `30`). Bump this for commands that return large output (e.g. `show log swlog`).
 - `protocol` — `tcp` (default) or `udp`, for `port_closed`.
 - `top_ports` — how many of the most common ports to scan per protocol (default `100`), for `port_scan_closed`.
+- `path` — HTTP path to request (default `/`), for `api_unreachable`.
 - `reauth` — set to `true` when the switch prompts for the account's password again before returning this command's output (observed on this device for privileged/audit-log commands such as `show log swlog`). The driver answers the prompt with the same password used to log in. Leave `false` for ordinary `show` commands.
 
 ## Version Templating
@@ -593,7 +601,7 @@ set SWITCH_SECUREADMIN_PASSWORD=...
 venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_service_disable.yaml --report-dir reports --json reports\secfunc_41b_result.json
 ```
 
-**TC-SM-41B** runs `ip service all admin-state disable`, then proves the switch really stopped answering: tcp/22 and tcp/443 can't be connected to (`tcp_blocked`), a browser can't load WebView (`web_unreachable`), one `nmap -sS -sU --top-ports 100 -T4` finds nothing open across the 100 most common TCP *and* UDP ports (`port_scan_closed`), `show ip service` no longer says `enabled`, and swlog carries `cmd: ip service all admin-state disable, result: SUCCESS`. Cleanup restores the baseline service posture explicitly (ssh/https/snmp/ntp back on; telnet/ftp/http stay off) rather than blanket-enabling everything, which would switch on services the CIS suite requires disabled.
+**TC-SM-41B** runs `ip service all admin-state disable`, then proves the switch really stopped answering by attempting each management path for real: an SSH socket connection (`tcp_blocked` on 22) and an HTTPS one (443), an API request (`api_unreachable`), a browser navigation to WebView (`web_unreachable`), one `nmap -sS -sU --top-ports 100 -T4` finds nothing open across the 100 most common TCP *and* UDP ports (`port_scan_closed`), `show ip service` no longer says `enabled`, and swlog carries `cmd: ip service all admin-state disable, result: SUCCESS`. Cleanup restores the baseline service posture explicitly (ssh/https/snmp/ntp back on; telnet/ftp/http stay off) rather than blanket-enabling everything, which would switch on services the CIS suite requires disabled.
 
 ⚠️ **This one takes the switch off the network for the duration.** Only the console session survives it, which is why `--device secureadmin` is mandatory. If cleanup doesn't run, re-enable from the console: `ip service ssh admin-state enable`, `ip service https admin-state enable`.
 

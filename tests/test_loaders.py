@@ -97,3 +97,14 @@ def test_secureadmin_declares_expected_firmware() -> None:
     # for it to actually check the version.
     device = load_devices(Path("configs/devices.yaml"))["secureadmin"]
     assert device.expected_firmware
+
+
+def test_service_disable_testcase_probes_every_management_path() -> None:
+    testcase = load_testcase(Path("testcases/secfunc/check_ip_service_disabled_enforcement.yaml"))
+    types = [v.type for v in testcase.validations]
+    assert ValidationType.TCP_BLOCKED in types      # SSH socket
+    assert ValidationType.API_UNREACHABLE in types  # HTTP request
+    assert ValidationType.WEB_UNREACHABLE in types  # browser navigation
+    api_check = next(v for v in testcase.validations if v.type == ValidationType.API_UNREACHABLE)
+    # Probing the auth endpoint would burn the account's lockout budget.
+    assert api_check.path == "/"

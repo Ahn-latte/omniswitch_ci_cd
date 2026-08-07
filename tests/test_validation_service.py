@@ -223,3 +223,44 @@ def test_port_scan_closed_names_the_ports_still_open(monkeypatch) -> None:
 
     assert result.status == ResultStatus.FAIL
     assert "22/tcp open (ssh)" in result.message
+
+
+def test_api_unreachable_passes_when_the_request_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_api_unreachable",
+        lambda target, port, path, timeout: (True, "GET https://192.0.2.1:443/ timed out after 20s"),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="api unreachable",
+            type=ValidationType.API_UNREACHABLE,
+            target="192.0.2.1",
+            port=443,
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+
+
+def test_api_unreachable_fails_when_the_switch_answers(monkeypatch) -> None:
+    # Any answer means the listener is up -- a 401 is still "reachable".
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_api_unreachable",
+        lambda target, port, path, timeout: (False, "GET ... answered HTTP 401 Unauthorized"),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="api unreachable",
+            type=ValidationType.API_UNREACHABLE,
+            target="192.0.2.1",
+            port=443,
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL

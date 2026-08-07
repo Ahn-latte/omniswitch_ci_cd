@@ -6,6 +6,7 @@ from switchtest.domain.results import ValidationResult
 from switchtest.domain.testcase import ValidationStep
 from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import ValidationExecutionError
+from switchtest.infrastructure.api_probe import check_api_unreachable
 from switchtest.infrastructure.nmap import scan_port, scan_top_ports
 from switchtest.infrastructure.ping import ping_target
 from switchtest.infrastructure.secrets import get_required_secret
@@ -27,6 +28,7 @@ class ValidationService:
             ValidationType.PORT_CLOSED: self._validate_port_closed,
             ValidationType.PORT_SCAN_CLOSED: self._validate_port_scan_closed,
             ValidationType.WEB_UNREACHABLE: self._validate_web_unreachable,
+            ValidationType.API_UNREACHABLE: self._validate_api_unreachable,
             ValidationType.TLS_VERSION: self._validate_tls_version,
             ValidationType.TCP_BLOCKED: self._validate_tcp_blocked,
             ValidationType.SNMP_GET: self._validate_snmp_get,
@@ -146,6 +148,25 @@ class ValidationService:
             message=None
             if unreachable
             else f"Web service on {validation.target}:{validation.port} is still reachable",
+        )
+
+    def _validate_api_unreachable(
+        self, driver: BaseSwitchDriver, validation: ValidationStep
+    ) -> ValidationResult:
+        unreachable, detail = check_api_unreachable(
+            validation.target or "",
+            validation.port or 0,
+            path=validation.path,
+            timeout=validation.timeout,
+        )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if unreachable else ResultStatus.FAIL,
+            observed=detail,
+            expected=f"JSON API on {validation.target}:{validation.port} unreachable",
+            message=None
+            if unreachable
+            else f"The API on {validation.target}:{validation.port} still answers requests",
         )
 
     def _validate_tls_version(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
