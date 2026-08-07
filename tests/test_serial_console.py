@@ -200,3 +200,41 @@ def test_close_logs_out_and_releases_the_port(fake_serial) -> None:
 
     assert fake.writes[-1] == "exit"
     assert fake.closed is True
+
+
+def test_close_confirms_leaving_unsaved_changes(fake_serial) -> None:
+    # Every testcase that configures anything leaves unsaved changes, so `exit`
+    # comes back with a confirmation instead of the login prompt. Answering `y`
+    # leaves without saving -- cleanup already restored the running config, and
+    # `write memory` would persist whatever a half-finished run left behind.
+    fake = fake_serial(
+        {
+            **LOGIN_SCRIPT,
+            "exit": "\r\nChanges have not been saved. Exit anyway? (Y/N) ",
+            "y": "\r\nlogin: ",
+        }
+    )
+    transport = _transport()
+    transport.connect()
+
+    transport.close()
+
+    assert fake.writes[-2:] == ["exit", "y"]
+    assert fake.closed is True
+
+
+def test_stale_session_logout_confirms_too(fake_serial) -> None:
+    fake = fake_serial(
+        {
+            "": "\r\nACSW01-> ",
+            "exit": "\r\nDo you want to exit without saving? (y/n): ",
+            "y": "\r\nlogin: ",
+            "secureadmin": "\r\nPassword: ",
+            "secret": "\r\nACSW01-> ",
+        }
+    )
+    transport = _transport()
+
+    transport.connect()
+
+    assert fake.writes[:4] == ["", "exit", "y", "secureadmin"]

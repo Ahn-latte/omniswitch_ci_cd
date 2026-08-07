@@ -41,6 +41,10 @@ LOGIN_FAILURE_PATTERN = re.compile(
 # the pager in the read loop keeps this transport independent of which AOS
 # release spells the "disable paging" command which way.
 PAGER_PATTERN = re.compile(r"(?i)(--\s*more\s*--|\(\s*more\s*\)|more\s*\?|press any key)")
+# `exit` with unsaved running-config changes -- which every testcase that
+# touches configuration leaves behind -- makes AOS ask for confirmation before
+# it lets go of the session. See _logout() for why the answer is always `y`.
+CONFIRM_PATTERN = re.compile(r"(?i)[(\[]\s*y(?:es)?\s*[/|]\s*n(?:o)?\s*[)\]]\s*[:?]?\s*$")
 
 
 @dataclass
@@ -93,8 +97,7 @@ class SerialConsoleTransport:
             # Log out so the console is left at its login prompt: an
             # authenticated console left open would count against the device's
             # one-session-per-account limit for the next run.
-            self._write("exit")
-            self._read_until(_matcher(LOGIN_PROMPT_PATTERN), timeout=5, expecting="login prompt")
+            self._logout(timeout=self.timeout_socket)
         except Exception:
             pass
         self._close_port()
@@ -157,12 +160,7 @@ class SerialConsoleTransport:
         if self._at_prompt(seen):
             # A previous run left the console logged in. Log out and back in so
             # the session is definitely the configured account.
-            self._write("exit")
-            seen = self._read_until(
-                _matcher(LOGIN_PROMPT_PATTERN),
-                timeout=self.timeout_socket,
-                expecting="console login prompt after logging out a stale session",
-            )
+            seen = self._logout(timeout=self.timeout_socket, stale=True)
         if LOGIN_PROMPT_PATTERN.search(_tail(seen)):
             self._write(self.auth_username)
             self._read_until(
@@ -180,6 +178,43 @@ class SerialConsoleTransport:
             raise AuthenticationError(
                 f"Console login as '{self.auth_username}' on {self.serial_port} was rejected"
             )
+
+    def _logout(self, timeout: int, stale: bool = False) -> str:
+        """Send `exit` and read back to the login prompt.
+
+        With unsaved running-config changes pending -- the normal state at the
+        end of a testcase that configured anything -- AOS doesn't just log out,
+        it asks whether to leave them unsaved ("...(Y/N)"). Left unanswered the
+        session never returns to the login prompt and this times out.
+
+        The answer is always `y`, i.e. leave without saving: testcases restore
+        whatever they changed in their own cleanup, so the running config is
+        already back where it belongs and there is nothing worth writing to
+        flash. `write memory` here would do the opposite of a favour -- it
+        would persist whatever state a half-finished run happened to leave.
+        """
+        self._write("exit")
+        expecting = "login prompt after logging out"
+        if stale:
+            expecting = "console login prompt after logging out a stale session"
+        deadline = time.monotonic() + timeout
+        buffer = ""
+        while time.monotonic() < deadline:
+            chunk = self._read_chunk()
+            if not chunk:
+                continue
+            buffer = self._answer_pager(buffer + chunk)
+            tail = _tail(buffer)
+            if CONFIRM_PATTERN.search(tail):
+                self._write("y")
+                buffer = buffer[: len(buffer) - len(tail)]
+                continue
+            if LOGIN_PROMPT_PATTERN.search(_tail(buffer)):
+                return buffer
+        raise ConnectionError(
+            f"Timed out after {timeout}s waiting for {expecting} on serial console "
+            f"{self.serial_port}. Last output: {_tail(buffer, lines=3)!r}"
+        )
 
     def _at_prompt(self, text: str) -> bool:
         tail = _tail(text)
@@ -205,21 +240,24 @@ class SerialConsoleTransport:
         except (SerialException, OSError) as exc:
             raise ConnectionError(f"Serial console write to {self.serial_port} failed: {exc}") from exc
 
-    def _read_until(self, matcher, timeout: int, expecting: str) -> str:
+    def _read_chunk(self) -> str:
         connection = self._require_connection()
+        try:
+            chunk = connection.read(connection.in_waiting or 1)
+        except (SerialException, OSError) as exc:
+            raise ConnectionError(
+                f"Serial console read from {self.serial_port} failed: {exc}"
+            ) from exc
+        return _decode(chunk)
+
+    def _read_until(self, matcher, timeout: int, expecting: str) -> str:
         deadline = time.monotonic() + timeout
         buffer = ""
         while time.monotonic() < deadline:
-            try:
-                chunk = connection.read(connection.in_waiting or 1)
-            except (SerialException, OSError) as exc:
-                raise ConnectionError(
-                    f"Serial console read from {self.serial_port} failed: {exc}"
-                ) from exc
+            chunk = self._read_chunk()
             if not chunk:
                 continue
-            buffer += _decode(chunk)
-            buffer = self._answer_pager(buffer)
+            buffer = self._answer_pager(buffer + chunk)
             if matcher(buffer):
                 return buffer
         raise ConnectionError(
