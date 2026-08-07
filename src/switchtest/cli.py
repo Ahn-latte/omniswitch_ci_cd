@@ -43,7 +43,8 @@ def run(
 @app.command("list-devices")
 def list_devices(devices_file: Path = typer.Option(DEFAULT_DEVICES_FILE, "--devices-file")) -> None:
     for device in load_devices(devices_file).values():
-        typer.echo(f"{device.name}\t{device.host}\t{device.platform}")
+        session = device.serial_port or f"{device.host}:{device.port}"
+        typer.echo(f"{device.name}\t{device.host}\t{device.platform}\t{device.transport.value}\t{session}")
 
 
 @app.command("validate-suite")

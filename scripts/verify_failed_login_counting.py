@@ -19,6 +19,11 @@ Connects as secureadmin (not admin1) for the same reason TC-IA-133 does: the
 account being locked can't be the one holding the observing session, and
 reading admin1's state is a secureadmin-level operation.
 
+The secureadmin device entry is attached over the serial console, so this
+needs the console cable connected and `serial_port` in configs/devices.yaml
+pointing at the right COM port. The failed login itself still goes out over
+SSH -- that is the path whose attempts the switch counts.
+
 Usage (cmd), from the omniswitch_ci_cd directory:
     set SWITCH_SECUREADMIN_PASSWORD=...
     venv\\Scripts\\python.exe scripts\\verify_failed_login_counting.py

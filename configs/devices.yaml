@@ -30,14 +30,26 @@ devices:
   # Audit/verification account. Needed by testcases that must observe another
   # account's state (e.g. TC-IA-133 locks admin1, so it cannot itself be
   # connected as admin1) and by swlog reads, which are secureadmin-only.
+  #
+  # Attached over the serial console, not SSH: TC-IA-134 bans this machine's
+  # IP, which kills every network path to the switch (SSH/API/WebView) while
+  # the ban is up. The console is out-of-band, so the validations and the
+  # `banned-ip all release` cleanup still get through.
+  #
+  # host/port still describe the switch's SSH service -- they are what `$host`
+  # and the tcp_blocked probe resolve to, and where trigger_failed_logins sends
+  # its (deliberately failing) network logins from.
   - name: secureadmin
     host: 192.168.1.1
     port: 22
     username: secureadmin
     password_env: SWITCH_SECUREADMIN_PASSWORD
     platform: aos
+    transport: serial
+    serial_port: COM4          # COM port the console cable enumerates as
+    serial_baudrate: 115200    # this switch's console speed (8N1)
     expected_prompt: "->"
-    tags: [lab, secfunc, audit]
+    tags: [lab, secfunc, audit, console]
     connection_timeout: 15
     command_timeout: 30
     strict_host_key: false

@@ -3,31 +3,51 @@ import re
 import time
 
 from switchtest.domain.device import DeviceDefinition
+from switchtest.domain.enums import TransportType
 from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import BaselineRestoreError, CommandExecutionError
 from switchtest.exceptions import ConnectionError as SwitchConnectionError
+from switchtest.infrastructure.console.client import SerialConsoleTransport
 from switchtest.infrastructure.secrets import get_optional_secret, get_required_secret
 from switchtest.infrastructure.ssh.client import SSHTransport
 from switchtest.infrastructure.ssh.prompt import PASSWORD_PROMPT_PATTERN, is_password_prompt
+
+DriverTransport = SSHTransport | SerialConsoleTransport
 
 
 class AOSSwitchDriver(BaseSwitchDriver):
     def __init__(self, device: DeviceDefinition) -> None:
         self.device = device
-        self.transport: SSHTransport | None = None
+        self.transport: DriverTransport | None = None
 
     def connect(self) -> None:
-        self.transport = SSHTransport(
+        self.transport = self._build_transport()
+        self.transport.connect()
+
+    def _build_transport(self) -> DriverTransport:
+        password = get_required_secret(self.device.password_env)
+        secondary = get_optional_secret(self.device.enable_password_env)
+        if self.device.transport == TransportType.SERIAL:
+            return SerialConsoleTransport(
+                serial_port=self.device.serial_port or "",
+                auth_username=self.device.username,
+                auth_password=password,
+                baudrate=self.device.serial_baudrate,
+                auth_secondary=secondary,
+                prompt=self.device.expected_prompt or "->",
+                timeout_socket=self.device.connection_timeout,
+                timeout_ops=self.device.command_timeout,
+            )
+        return SSHTransport(
             host=self.device.host,
             port=self.device.port,
             auth_username=self.device.username,
-            auth_password=get_required_secret(self.device.password_env),
-            auth_secondary=get_optional_secret(self.device.enable_password_env),
+            auth_password=password,
+            auth_secondary=secondary,
             timeout_socket=self.device.connection_timeout,
             timeout_ops=self.device.command_timeout,
             auth_strict_key=self.device.strict_host_key,
         )
-        self.transport.connect()
 
     def disconnect(self) -> None:
         if self.transport is not None:
@@ -114,6 +134,10 @@ class AOSSwitchDriver(BaseSwitchDriver):
         }
 
     def attempt_login(self, username: str, password: str, timeout: int = 15) -> bool:
+        # Always SSH, even when the driver's own session is a serial console:
+        # the point of the lockout/IP-ban testcases is that the failed attempts
+        # arrive over the network from this machine's IP, which is exactly what
+        # the switch counts and then bans. Console attempts would not.
         transport = SSHTransport(
             host=self.device.host,
             port=self.device.port,
@@ -134,9 +158,11 @@ class AOSSwitchDriver(BaseSwitchDriver):
         transport.close()
         return True
 
-    def _transport(self) -> SSHTransport:
+    def _transport(self) -> DriverTransport:
         if self.transport is None:
-            raise CommandExecutionError("SSH transport is not connected")
+            raise CommandExecutionError(
+                f"{self.device.transport.value} transport is not connected"
+            )
         return self.transport
 
 

@@ -145,6 +145,21 @@ devices:
     connection_timeout: 15
     command_timeout: 30
     strict_host_key: false
+
+  - name: secureadmin
+    host: 192.168.1.1
+    port: 22
+    username: secureadmin
+    password_env: SWITCH_SECUREADMIN_PASSWORD
+    platform: aos
+    transport: serial
+    serial_port: COM4
+    serial_baudrate: 115200
+    expected_prompt: "->"
+    tags: [lab, secfunc, audit, console]
+    connection_timeout: 15
+    command_timeout: 30
+    strict_host_key: false
 ```
 
 Important:
@@ -152,6 +167,9 @@ Important:
 - `platform` currently supports `aos`.
 - The framework does not provision device accounts. Any account referenced by a device entry (e.g. `lowpriv`'s `user1`) must already exist on the switch, created out-of-band, before tests run against it.
 - A separate low-privilege device entry is needed whenever a testcase must prove that a restricted account is denied a privileged action — running that testcase under an admin/secureadmin account would make the check meaningless (it would always pass).
+- `transport` selects how the framework holds its *own* session with the device: `ssh` (default) or `serial` (a locally attached RS-232/USB-serial console). A serial entry must also set `serial_port` (`COM4` on Windows, `/dev/ttyUSB0` on Linux); `serial_baudrate` defaults to `9600` (the AOS console default) — the lab switch runs its console at `115200`, so its entry sets that explicitly. Both are 8N1.
+- A serial entry still needs `host`/`port`. They are the device's SSH service, and remain what `$host` resolves to, what network validations (`ping`, `port_closed`, `tcp_blocked`) probe, and where `trigger_failed_logins` sends its deliberately failing logins — those must arrive over the network from this machine's IP to be counted, regardless of how the driver's own session is attached.
+- Use `transport: serial` when the testcase makes the device stop answering *this machine* over the network — an IP ban (TC-IA-134) drops SSH, API and WebView alike, and only an out-of-band console survives it to run the validations and the cleanup. `switchtest list-devices` prints each device's transport and the port its session uses.
 - `expected_firmware` is the single source of truth for what firmware version a device is supposed to be running. Testcases reference it instead of hardcoding a version — see [Version Templating](#version-templating) below. Bump it here when the switch gets a new release; you don't need to touch any testcase files.
 
 ### Secrets
@@ -418,7 +436,7 @@ tests:
 | `suite8.yaml` | 8.x | Audit |
 | `secfunc_auto.yaml` | 5.x / 8.x | Boot self-test and audit-generation checks runnable under the normal admin device (overlaps `suite5`/`suite8`; not yet consolidated) |
 | `secfunc_lowpriv.yaml` | 8.4.1 | Audit access-restriction check — **must** run with `--device lowpriv`, never an admin account, or the check is meaningless |
-| `secfunc_lockout.yaml` | 1.3.3 / 1.3.4 | Account-lockout and IP-ban *enforcement* checks — **must** run with `--device secureadmin`. They lock `admin1`, so the suite can't be connected as `admin1` (that would lock its own session), and reading swlog needs secureadmin. The IP-ban testcase bans this machine's own IP; see [Example 5](#example-5-run-the-account-lockout-and-ip-ban-enforcement-checks) |
+| `secfunc_lockout.yaml` | 1.3.3 / 1.3.4 | Account-lockout and IP-ban *enforcement* checks — **must** run with `--device secureadmin`, which is attached over the **serial console**. They lock `admin1`, so the suite can't be connected as `admin1` (that would lock its own session), and reading swlog needs secureadmin. The IP-ban testcase bans this machine's own IP; see [Example 5](#example-5-run-the-account-lockout-and-ip-ban-enforcement-checks) |
 
 ## Example Workflows
 
@@ -473,6 +491,8 @@ venv\Scripts\switchtest run --device lowpriv --suite suites\secfunc_lowpriv.yaml
 
 ### Example 5: Run the account-lockout and IP-ban enforcement checks
 
+The `secureadmin` device is attached over the **serial console** (`COM4`, `115200` 8N1 in this lab), so connect the console cable before running this suite. If the cable enumerates as a different port on your machine, update `serial_port` in [configs/devices.yaml](configs/devices.yaml) — `mode` in `cmd.exe`, or Device Manager → Ports, lists what's available:
+
 ```cmd
 set SWITCH_SECUREADMIN_PASSWORD=...
 venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_lockout.yaml --report-dir reports --json reports\secfunc_133_result.json
@@ -485,7 +505,7 @@ Two testcases run in order:
 
 `--device secureadmin` is required: the account under test (`admin1`) can't also be the one holding the session that observes and unlocks it.
 
-⚠️ **TC-IA-134 bans the machine you run it from.** It only works because the `secureadmin` SSH session is already open when the ban lands — an IP ban blocks *new* connections, not established ones — so the validations and the `banned-ip all release` cleanup still get through. If that cleanup doesn't run (process killed mid-test, connection lost), the IP stays banned and nothing can reconnect; release it from the switch console with `aaa switch-access banned-ip all release`.
+⚠️ **TC-IA-134 bans the machine you run it from.** Every network path to the switch — SSH, API, WebView — goes dead from this host for the duration. The suite survives it because `secureadmin` runs over the serial console, which is out-of-band and unaffected by the ban, so the validations and the `banned-ip all release` cleanup still get through. The failed logins themselves still go out over SSH (`attempt_login`); that's what the switch counts and bans. If the cleanup doesn't run (process killed mid-test), the IP stays banned and nothing on the network can reconnect — release it from the console with `aaa switch-access banned-ip all release`.
 
 TC-IA-133 brackets itself with `aaa switch-access ip-lockout-threshold` (setup raises it to `15`, cleanup restores `6`) so its own 3 failures can't trip the IP ban as a side effect; TC-IA-134 pins the threshold to `6` in setup because tripping that ban is exactly what it's testing. `omniswitch_api_poc`'s API/WebView equivalents of both checks manage the threshold the same way, so every one of them is self-contained and safe to run alone, in any order, or repeatedly.
 
@@ -553,6 +573,7 @@ The AOS driver in [aos.py](src/switchtest/drivers/aos.py) includes:
 - retry on transient empty `show` output,
 - Windows-safe SSH transport selection,
 - suppression of noisy Windows close-time socket warnings from Paramiko,
+- a serial console transport ([console/client.py](src/switchtest/infrastructure/console/client.py)) for `transport: serial` devices — it drives the console's `login:`/`Password:` dialogue itself (there is no protocol-level auth over serial), logs out any stale session it finds already authenticated, answers `--More--` pagers so long output like `swlog` comes back whole, and logs out on close so the console doesn't hold an account's one allowed session; `attempt_login()` deliberately stays on SSH even for these devices, because failed logins only count against this machine's IP if they arrive over the network,
 - re-authentication handling for commands flagged `reauth: true` in a testcase (answers a mid-session `Password:` prompt with the login password),
 - automatic session recovery: if a test errors out (including a dead/EOF'd connection), the orchestrator reconnects before running the next test in the suite instead of letting the failure cascade.
 
@@ -578,6 +599,7 @@ Current limitations:
 
 - one switch at a time,
 - one platform driver (`aos`),
+- the serial transport assumes a console port attached to the machine running the tests; remote console/terminal servers (telnet-to-console) are not supported,
 - CIS suite is CIS-aligned, not an official vendor-specific CIS benchmark,
 - some testcases still need environment-specific tuning depending on switch configuration,
 - the framework does not provision device accounts (e.g. `lowpriv`'s `user1` must be created on the switch out-of-band before tests can run),

@@ -13,6 +13,18 @@ class ValidationType(str, Enum):
     TCP_BLOCKED = "tcp_blocked"
 
 
+class TransportType(str, Enum):
+    """How the framework holds its own management session with the device.
+
+    ``SERIAL`` is a locally attached console port (RS-232 / USB-serial), which
+    is out-of-band: it keeps working while the device refuses network logins
+    from this machine's IP. Testcases that ban this machine need it.
+    """
+
+    SSH = "ssh"
+    SERIAL = "serial"
+
+
 class TestAction(str, Enum):
     CLI = "cli"
     WAIT = "wait"

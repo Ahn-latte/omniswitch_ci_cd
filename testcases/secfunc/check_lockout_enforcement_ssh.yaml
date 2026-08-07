@@ -5,7 +5,9 @@ description: >-
   show user admin1 확인)와 감사로그(show log swlog)에 기록되는지 확인. 잠금 임계값/시간 "설정값"만
   확인하는 TC-IA-131/TC-IA-132와 달리, 잠금이 실제로 동작하는지(behavioral) 검증. 시험 종료 후 admin1
   계정 잠금 해제. 반드시 --device secureadmin 으로 실행할 것 - ACSSW01(admin1)로 돌리면 접속에 쓰는
-  계정을 스스로 잠그는 모순이 되고, swlog 열람도 secureadmin 권한이 필요함.
+  계정을 스스로 잠그는 모순이 되고, swlog 열람도 secureadmin 권한이 필요함. secureadmin 세션 자체는
+  시리얼 콘솔로 붙지만(같은 스위트의 TC-IA-134가 IP 차단을 유발하기 때문), 이 시험의 실패 로그인은
+  SSH로 나가므로 검증 대상은 동일함.
 
   IP 단위 잠금 임계값(aaa switch-access ip-lockout-threshold)을 setup에서 15로 올렸다가
   cleanup에서 6으로 복구함 - 이 시험 자신의 admin1 실패 3회가 계정과 무관한 IP 단위 카운터에도

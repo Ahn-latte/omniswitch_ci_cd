@@ -7,13 +7,16 @@ description: >-
   접속이 SSH/API/WebView 모두 드롭되므로(연결 타임아웃), tcp_blocked 검증으로 22번 포트 재접속이
   막혔음을 확인하고 감사로그에서 Banning 기록을 확인함.
 
-  반드시 --device secureadmin 으로 실행할 것. 이 시험이 성립하는 이유는 secureadmin SSH 세션이
-  차단 발생 *이전에* 이미 열려 있기 때문 - IP 차단은 신규 연결만 막고 기존 세션은 유지되므로, 검증과
-  클린업(banned-ip release / user unlock)을 그 세션으로 수행할 수 있음. admin1(ACSSW01)로 돌리면
-  접속 계정을 스스로 잠그는 모순이 되고 swlog 열람 권한도 없음.
+  반드시 --device secureadmin 으로 실행할 것. secureadmin 세션은 SSH가 아니라 시리얼 콘솔로
+  붙는다(configs/devices.yaml 의 transport: serial) - 차단 대상이 바로 이 장비의 IP이므로,
+  네트워크 경로(SSH/API/WebView)는 차단 중에는 전부 죽고 대역 외(out-of-band)인 콘솔만 살아 있음.
+  덕분에 검증과 클린업(banned-ip release / user unlock)이 차단 상태에서도 확실히 수행되며, 차단
+  이전에 세션을 미리 열어두는 것에 의존하지 않음. 실패 로그인(trigger_failed_logins)은 콘솔이 아니라
+  SSH로 나가야 카운트되므로 그대로 네트워크 경로를 사용함. admin1(ACSSW01)로 돌리면 접속 계정을
+  스스로 잠그는 모순이 되고 swlog 열람 권한도 없음.
 
   경고: cleanup이 실행되지 않은 채(예: 프로세스 강제 종료) 끝나면 이 장비의 IP가 차단된 상태로 남아
-  이후 어떤 접속도 불가능해짐. 그 경우 콘솔에서
+  이후 네트워크 접속이 불가능해짐. 그 경우 콘솔에서
   aaa switch-access banned-ip all release 로 해제할 것.
 feature: system
 tags: [secfunc, ia, audit, required, secureadmin]
