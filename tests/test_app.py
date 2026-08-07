@@ -28,3 +28,14 @@ def test_run_application_dry_run_returns_success() -> None:
         )
     )
     assert exit_code == int(ExitCode.SUCCESS)
+
+
+def test_missing_expected_firmware_is_left_unsubstituted() -> None:
+    from switchtest.utils.templating import render_template
+
+    # A device entry with no expected_firmware must not turn a version pattern
+    # into an empty (match-anything) one; the placeholder survives and the
+    # validation fails visibly instead.
+    variables = {"host": "192.0.2.1"}
+    assert render_template("$expected_firmware", variables) == "$expected_firmware"
+    assert render_template("$host", variables) == "192.0.2.1"

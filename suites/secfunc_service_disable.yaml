@@ -1,0 +1,11 @@
+name: secfunc_service_disable
+description: >-
+  원격 서비스 비활성화 실동작 시험(4.1) - 반드시 --device secureadmin 으로 실행.
+  이 시험은 SSH/HTTPS를 포함한 모든 IP 서비스를 끄기 때문에 네트워크로 붙은 세션으로는
+  검증도 클린업도 불가능함. secureadmin 엔트리는 시리얼 콘솔(transport: serial)로 붙으므로
+  실행 전 configs/devices.yaml 의 serial_port 가 실제 COM 포트와 맞는지 확인할 것.
+  포트스캔에 nmap이 필요하며(-sS -sU 상위 100개), raw socket 권한이 있어야 하므로
+  반드시 관리자 권한 cmd에서 실행할 것.
+  cleanup 미실행 시 콘솔에서 ip service ssh/https admin-state enable 로 복구할 것.
+tests:
+  - ../testcases/secfunc/check_ip_service_disabled_enforcement.yaml

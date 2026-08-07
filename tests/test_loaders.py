@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from switchtest.domain.device import DeviceDefinition
-from switchtest.domain.enums import TransportType
+from switchtest.domain.enums import TransportType, ValidationType
 from switchtest.infrastructure.loaders.devices import load_devices
 from switchtest.infrastructure.loaders.suites import load_suite_testcases
 from switchtest.infrastructure.loaders.testcases import load_testcase
@@ -48,7 +48,52 @@ def test_load_testcase() -> None:
     assert len(testcase.validations) == 2
 
 
+def test_load_snmp_testcase_credentials() -> None:
+    testcase = load_testcase(Path("testcases/secfunc/check_snmpv3_get_set_permissions.yaml"))
+    get_check = testcase.validations[0]
+    assert get_check.type == ValidationType.SNMP_GET
+    assert get_check.oid == "sysName.0"
+    assert get_check.snmp is not None
+    assert get_check.snmp.auth_protocol == "SHA-256"
+    assert get_check.snmp.priv_protocol == "AES"
+    # The read-only account's write attempt must be the denial check, not a set.
+    denial = testcase.validations[-1]
+    assert denial.type == ValidationType.SNMP_DENIED
+    assert denial.snmp.user.endswith("ro")
+
+
+def test_service_disable_testcase_scans_the_top_ports() -> None:
+    testcase = load_testcase(Path("testcases/secfunc/check_ip_service_disabled_enforcement.yaml"))
+    scan = next(v for v in testcase.validations if v.type == ValidationType.PORT_SCAN_CLOSED)
+    assert scan.top_ports == 100
+    # One nmap run covers both protocols, so the per-port checks are gone.
+    assert not any(v.type == ValidationType.PORT_CLOSED for v in testcase.validations)
+    # UDP scanning is slow enough that the default 30s timeout would never do.
+    assert scan.timeout >= 300
+    # Cleanup must not silently swallow failures -- only the leftover-clearing
+    # setup steps may.
+    assert not any(step.ignore_errors for step in testcase.cleanup)
+
+
 def test_load_suite_testcases() -> None:
     suite, tests = load_suite_testcases(Path("suites/smoke.yaml"))
     assert suite.name == "smoke"
     assert len(tests) >= 1
+
+
+def test_snmp_testcase_reads_sysname_and_os_version() -> None:
+    testcase = load_testcase(Path("testcases/secfunc/check_snmpv3_get_set_permissions.yaml"))
+    oids = [v.oid for v in testcase.validations if v.oid]
+    assert "sysName.0" in oids
+    assert "sysDescr.0" in oids
+    version_check = next(v for v in testcase.validations if v.oid == "sysDescr.0")
+    # The version comes from the device entry, never hardcoded in the testcase.
+    assert version_check.pattern == "$expected_firmware"
+
+
+def test_secureadmin_declares_expected_firmware() -> None:
+    # Without it, `$expected_firmware` would stay unsubstituted and the
+    # sysDescr check would fail rather than pass vacuously -- but the point is
+    # for it to actually check the version.
+    device = load_devices(Path("configs/devices.yaml"))["secureadmin"]
+    assert device.expected_firmware

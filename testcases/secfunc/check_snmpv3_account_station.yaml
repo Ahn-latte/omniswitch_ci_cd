@@ -1,0 +1,67 @@
+id: TC-SM-42
+name: SNMPv3 account and trap station are created and audited
+description: >-
+  시리얼 콘솔의 secureadmin 세션에서 SNMPv3 계정(sha256+aes, read-write)과 SNMP 스테이션을
+  생성하고, 두 명령이 감사로그(show log swlog)에 result: SUCCESS 로 기록되는지 검증. 특히
+  스테이션 생성 명령의 성공 기록이 이 시험의 핵심 검증 항목임. (4.x)
+
+  실행 명령:
+    user snmpv3 password ****** sha256+aes read-write all allow-ssh enable
+    snmp station 192.168.1.10 161 snmpv3 v3 enable
+  swlog에는 비밀번호가 ****** 로 마스킹되어 기록되므로 패턴도 그에 맞춰져 있음.
+
+  반드시 --device secureadmin 으로 실행할 것 - swlog 열람에 secureadmin 권한이 필요하고,
+  이 계정 엔트리가 시리얼 콘솔(transport: serial)로 붙음. 콘솔에서 나갈 때 설정 변경이 있으면
+  AOS가 저장 여부를 (Y/N)으로 되묻는데, 세션이 y(저장하지 않고 종료)로 답함 - cleanup이 만든
+  계정과 스테이션을 이미 지웠으므로 flash에 남길 것이 없음.
+
+  스테이션 IP(192.168.1.10)는 트랩 수신자, 즉 이 시험을 돌리는 PC 주소임. 랩이 다르면
+  setup/cleanup 양쪽의 IP를 함께 바꿀 것.
+
+  TC-SM-43과 계정을 공유하지 않음 - 각 시험이 자기 계정을 만들고 지우므로 단독으로,
+  임의 순서로, 반복 실행해도 안전함.
+feature: system
+tags: [secfunc, mgmt, snmp, audit, required, secureadmin, console]
+severity: high
+setup:
+  # Clear anything a previous run left behind before creating it again:
+  # `user snmpv3 ...` on an existing account comes back as an error, which
+  # would fail the setup rather than the check. Deleting what isn't there is
+  # equally an error, hence ignore_errors on this step only.
+  - action: cli
+    ignore_errors: true
+    commands:
+      - no snmp station 192.168.1.10
+      - no user snmpv3
+  - action: cli
+    commands:
+      - user snmpv3 password 12#qweASD sha256+aes read-write all allow-ssh enable
+      - snmp station 192.168.1.10 161 snmpv3 v3 enable
+validations:
+  - name: 감사로그에 스테이션 생성 성공 기록
+    type: regex
+    command: show log swlog | grep -i station
+    pattern: 'cmd: snmp station 192\.168\.1\.10 161 snmpv3 v3 enable, result: SUCCESS'
+    timeout: 90
+    reauth: true
+  - name: 감사로그에 SNMPv3 계정 생성 성공 기록
+    type: regex
+    command: show log swlog | grep -i snmpv3
+    pattern: 'cmd: user snmpv3 password \*+ sha256\+aes read-write all allow-ssh enable, result: SUCCESS'
+    timeout: 90
+    reauth: true
+  - name: 스테이션이 설정에 반영됨 (show snmp station)
+    type: contains
+    command: show snmp station
+    expected: "192.168.1.10"
+  - name: SNMPv3 계정이 생성됨 (show user snmpv3)
+    type: contains
+    command: show user snmpv3
+    expected: "snmpv3"
+cleanup:
+  - action: cli
+    commands:
+      - no snmp station 192.168.1.10
+      - no user snmpv3
+continue_on_failure: false
+timeout: 300

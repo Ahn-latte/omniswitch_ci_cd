@@ -1,0 +1,123 @@
+id: TC-SM-43
+name: SNMPv3 get/set works for read-write and is refused for read-only
+description: >-
+  net-snmp로 SNMPv3(authPriv, SHA-256 + AES) 요청을 UDP/161로 보내 sysName.0 을 읽고
+  쓰는 것이 read-write 계정에서는 동작하고, read-only 계정에서는 쓰기가 거부되는지 검증.
+  MIB 브라우저로 하던 절차(계정/알고리즘/비밀번호를 넣어 agent 프로필을 만들고 get/set)를
+  자동화한 것으로, 브라우저가 대화상자로 받던 값이 그대로 snmpget/snmpset 인자가 됨. (4.x)
+
+  검증 항목:
+    1) rw 계정으로 sysName.0 get -> show system 의 Name(OS6900)과 일치
+    2) rw 계정으로 sysDescr.0 get -> OS 버전이 장비 엔트리의 expected_firmware와 일치
+    3) rw 계정으로 sysName.0 set -> 값이 실제로 바뀌고 다시 읽힘 (원래 값은 자동 복구)
+    4) ro 계정으로 sysName.0 get -> 읽기는 허용 (자격증명 자체는 정상이라는 대조군)
+    5) ro 계정으로 sysName.0 set -> 거부 (notWritable/noAccess)
+  sysName/sysDescr로 받아온 실제 값은 validation의 observed 필드에 그대로 남으므로
+  JSON 리포트에서 시험 시점의 장비 이름과 OS 버전을 확인할 수 있음.
+  set 검증은 원래 값을 먼저 읽어두고 확인 후 되돌리므로, 시험이 sysName을 바꾼 채로
+  끝나지 않음. cleanup의 system name OS6900 은 그 복구가 실패했을 때를 위한 이중 안전장치임.
+
+  준비물: net-snmp가 PATH에 있어야 함(snmpget/snmpset). Windows는 Net-SNMP 설치본,
+  Linux는 snmp 패키지. 스위치의 ip service snmp 가 enabled 여야 함.
+
+  반드시 --device secureadmin 으로 실행할 것 - 계정 생성/삭제와 swlog 열람이 secureadmin
+  권한이고, 이 엔트리가 시리얼 콘솔(transport: serial)로 붙음. SNMP 요청 자체는 콘솔이 아니라
+  네트워크(UDP/161)로 나감 - 관리 스테이션이 실제로 겪는 경로를 그대로 시험하는 것이 목적.
+
+  TC-SM-42와 계정을 공유하지 않음 - 각 시험이 자기 계정을 만들고 지움.
+feature: system
+tags: [secfunc, mgmt, snmp, required, secureadmin, console]
+severity: high
+setup:
+  # See TC-SM-42: recreating an existing account is an error, deleting a
+  # missing one is too, so the pre-clean step tolerates errors and the
+  # creation step does not.
+  - action: cli
+    ignore_errors: true
+    commands:
+      - no user snmpv3
+      - no user snmpv3ro
+  - action: cli
+    commands:
+      - ip service snmp admin-state enable
+      - user snmpv3 password 12#qweASD sha256+aes read-write all allow-ssh enable
+      - user snmpv3ro password 12#qweASD sha256+aes read-only all allow-ssh enable
+validations:
+  - name: rw 계정으로 sysName.0 get
+    type: snmp_get
+    target: $host
+    port: 161
+    oid: sysName.0
+    expected: "OS6900"
+    timeout: 20
+    snmp:
+      user: snmpv3
+      level: authPriv
+      auth_protocol: SHA-256
+      priv_protocol: AES
+      auth_password: "12#qweASD"
+  # sysDescr는 show system 의 Description 과 같은 문자열이라 OS 버전이 그대로 들어 있음:
+  # "Alcatel-Lucent Enterprise OS6900-X48C6 8.10.86.R04 GA, December 18, 2025."
+  # 버전은 하드코딩하지 않고 devices.yaml 의 expected_firmware 를 치환해서 씀.
+  - name: rw 계정으로 sysDescr.0 get (OS 버전 확인)
+    type: snmp_get
+    target: $host
+    port: 161
+    oid: sysDescr.0
+    pattern: '$expected_firmware'
+    timeout: 20
+    snmp:
+      user: snmpv3
+      level: authPriv
+      auth_protocol: SHA-256
+      priv_protocol: AES
+      auth_password: "12#qweASD"
+  - name: rw 계정으로 sysName.0 set (원래 값 자동 복구)
+    type: snmp_set
+    target: $host
+    port: 161
+    oid: sysName.0
+    value: "OS6900-SNMPTEST"
+    value_type: s
+    timeout: 20
+    snmp:
+      user: snmpv3
+      level: authPriv
+      auth_protocol: SHA-256
+      priv_protocol: AES
+      auth_password: "12#qweASD"
+  - name: ro 계정으로 sysName.0 get은 허용 (대조군)
+    type: snmp_get
+    target: $host
+    port: 161
+    oid: sysName.0
+    expected: "OS6900"
+    timeout: 20
+    snmp:
+      user: snmpv3ro
+      level: authPriv
+      auth_protocol: SHA-256
+      priv_protocol: AES
+      auth_password: "12#qweASD"
+  - name: ro 계정으로 sysName.0 set은 거부
+    type: snmp_denied
+    target: $host
+    port: 161
+    oid: sysName.0
+    value: "OS6900-DENIED"
+    value_type: s
+    timeout: 20
+    snmp:
+      user: snmpv3ro
+      level: authPriv
+      auth_protocol: SHA-256
+      priv_protocol: AES
+      auth_password: "12#qweASD"
+cleanup:
+  - action: cli
+    commands:
+      - system name OS6900
+      - no user snmpv3
+      - no user snmpv3ro
+continue_on_failure: false
+timeout: 300

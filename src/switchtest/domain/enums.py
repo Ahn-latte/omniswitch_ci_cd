@@ -8,9 +8,24 @@ class ValidationType(str, Enum):
     EQUALS = "equals"
     PING = "ping"
     PORT_CLOSED = "port_closed"
+    PORT_SCAN_CLOSED = "port_scan_closed"
     WEB_UNREACHABLE = "web_unreachable"
     TLS_VERSION = "tls_version"
     TCP_BLOCKED = "tcp_blocked"
+    SNMP_GET = "snmp_get"
+    SNMP_SET = "snmp_set"
+    SNMP_DENIED = "snmp_denied"
+
+
+class TransportProtocol(str, Enum):
+    """Which IP protocol a port-level validation scans.
+
+    SNMP listens on UDP, so `port_closed` has to be able to ask nmap for a
+    UDP scan (`-sU`) rather than the default TCP one.
+    """
+
+    TCP = "tcp"
+    UDP = "udp"
 
 
 class TransportType(str, Enum):

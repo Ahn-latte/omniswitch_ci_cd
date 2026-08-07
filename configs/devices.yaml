@@ -49,6 +49,10 @@ devices:
     serial_port: COM4          # COM port the console cable enumerates as
     serial_baudrate: 115200    # this switch's console speed (8N1)
     expected_prompt: "->"
+    # Same physical switch as ACSSW01, so the same expected release. Testcases
+    # run under this entry (e.g. the SNMP sysDescr check) resolve
+    # $expected_firmware from here.
+    expected_firmware: "8.10.86.R04"
     tags: [lab, secfunc, audit, console]
     connection_timeout: 15
     command_timeout: 30

@@ -21,7 +21,13 @@ class BaseSwitchDriver(ABC):
     def run_show(self, command: str, timeout: int = 30, reauth: bool = False) -> str: ...
 
     @abstractmethod
-    def apply_config(self, commands: list[str], timeout: int = 30) -> list[str]: ...
+    def apply_config(
+        self, commands: list[str], timeout: int = 30, ignore_errors: bool = False
+    ) -> list[str]:
+        """Send configuration commands. Raises unless `ignore_errors`, which is
+        for commands whose failure is acceptable (clearing leftovers that may
+        or may not exist)."""
+        ...
 
     @abstractmethod
     def restore_baseline(self, source: str | None = None) -> None: ...

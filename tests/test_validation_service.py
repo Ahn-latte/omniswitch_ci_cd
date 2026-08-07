@@ -45,7 +45,7 @@ def test_port_closed_validator_passes_when_nmap_reports_closed(monkeypatch) -> N
     monkeypatch.setattr(
         validation_service_module,
         "scan_port",
-        lambda target, port, timeout: ("closed", "23/tcp closed telnet"),
+        lambda target, port, timeout, protocol: ("closed", "23/tcp closed telnet"),
     )
     service = ValidationService()
     result = service.run_validation(
@@ -55,11 +55,36 @@ def test_port_closed_validator_passes_when_nmap_reports_closed(monkeypatch) -> N
     assert result.status == ResultStatus.PASS
 
 
+def test_port_closed_validator_scans_udp_when_asked(monkeypatch) -> None:
+    # SNMP listens on UDP, so the scan protocol has to reach nmap.
+    seen: dict[str, str] = {}
+
+    def fake_scan(target, port, timeout, protocol):
+        seen["protocol"] = protocol
+        return "open|filtered", "161/udp open|filtered snmp"
+
+    monkeypatch.setattr(validation_service_module, "scan_port", fake_scan)
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="snmp closed",
+            type=ValidationType.PORT_CLOSED,
+            target="192.0.2.1",
+            port=161,
+            protocol="udp",
+        ),
+    )
+
+    assert seen["protocol"] == "udp"
+    # A silent UDP port reads as open|filtered, which is "not open".
+    assert result.status == ResultStatus.PASS
+
+
 def test_port_closed_validator_fails_when_nmap_reports_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "scan_port",
-        lambda target, port, timeout: ("open", "23/tcp open telnet"),
+        lambda target, port, timeout, protocol: ("open", "23/tcp open telnet"),
     )
     service = ValidationService()
     result = service.run_validation(
@@ -163,3 +188,38 @@ def test_tcp_blocked_validator_fails_when_connection_succeeds(monkeypatch) -> No
         ValidationStep(name="ssh blocked", type=ValidationType.TCP_BLOCKED, target="192.0.2.1", port=22),
     )
     assert result.status == ResultStatus.FAIL
+
+
+def test_port_scan_closed_passes_when_nothing_is_open(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "scan_top_ports",
+        lambda target, top_ports, timeout: ([], "All 200 scanned ports on 192.0.2.1 are closed"),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="top 100 closed", type=ValidationType.PORT_SCAN_CLOSED, target="192.0.2.1"
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+
+
+def test_port_scan_closed_names_the_ports_still_open(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "scan_top_ports",
+        lambda target, top_ports, timeout: (["22/tcp open (ssh)"], "22/tcp open ssh"),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="top 100 closed", type=ValidationType.PORT_SCAN_CLOSED, target="192.0.2.1"
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "22/tcp open (ssh)" in result.message

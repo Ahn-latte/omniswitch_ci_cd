@@ -1,0 +1,85 @@
+id: TC-SM-41B
+name: Disabling every IP service actually blocks all network management
+description: >-
+  ip service all admin-state disable 를 걸고, 원격 관리 경로(SSH/API/WebView)가 실제로 전부
+  끊기는지와 포트가 닫히는지를 검증. 설정값만 확인하는 TC-SM-41(show ip service 출력)과 달리,
+  비활성화가 실제로 동작하는지(behavioral) 확인함. 마지막으로 감사로그에 비활성화 명령이
+  기록됐는지 보고 원래 상태로 복구함. (4.1)
+
+  반드시 --device secureadmin 으로 실행할 것. secureadmin 세션은 시리얼 콘솔로 붙는다
+  (configs/devices.yaml 의 transport: serial) - 이 시험은 SSH/HTTPS를 포함한 모든 네트워크
+  관리 경로를 스스로 끊기 때문에, 네트워크로 붙은 세션으로는 검증도 클린업도 불가능함.
+  콘솔은 대역 외라 영향을 받지 않음.
+
+  포트스캔은 nmap -Pn -sS -sU --top-ports 100 -T4 -v 한 번으로 TCP/UDP 상위 100개씩을
+  훑고, 열린 포트가 하나도 없는지 확인함. -sS/-sU 모두 raw socket 권한이 필요하니 반드시
+  관리자 권한 cmd에서 실행할 것 - 권한이 없으면 nmap이 상태를 판별하지 못해 ERROR로 끝남
+  (조용히 통과하지 않음). UDP는 응답이 없을 때 closed가 아니라 open|filtered 로 나오는 것이
+  정상이며 이 검증은 그것을 "열려 있지 않음"으로 봄. 상위 100개는 시간이 예측 가능한 범위의
+  스모크 검증이지 전 포트(65535) 증명이 아님 - 비표준 포트에 붙은 서비스는 보이지 않음.
+
+  경고: cleanup이 실행되지 않은 채(예: 프로세스 강제 종료) 끝나면 모든 원격 관리 서비스가
+  꺼진 상태로 남아 네트워크로는 접속이 불가능해짐. 그 경우 콘솔에서
+  ip service ssh admin-state enable / ip service https admin-state enable 로 복구할 것.
+feature: system
+tags: [secfunc, mgmt, audit, required, secureadmin, console]
+severity: high
+setup:
+  - action: cli
+    commands:
+      - ip service all admin-state disable
+  # The switch drops its listeners asynchronously; without this the first
+  # probe can still land on a socket that hasn't been torn down yet.
+  - action: wait
+    seconds: 5
+validations:
+  - name: SSH 신규 접속 불가 (tcp/22)
+    type: tcp_blocked
+    target: $host
+    port: 22
+    timeout: 20
+  - name: API/WebView 신규 접속 불가 (tcp/443)
+    type: tcp_blocked
+    target: $host
+    port: 443
+    timeout: 20
+  - name: WebView 브라우저 접속 불가 (https/443)
+    type: web_unreachable
+    target: $host
+    port: 443
+    timeout: 30
+  # nmap -Pn -sS -sU --top-ports 100 -T4 -v <host>
+  # 상위 100개는 프로토콜별이라 TCP 100 + UDP 100이며, 검증 대상인
+  # 22/23/80/443(tcp)와 161/162/123(udp)이 모두 포함됨. 열린 포트가 하나라도
+  # 있으면 어느 포트인지 message에 남음.
+  - name: 포트스캔 - 상위 100개 tcp/udp 포트 중 열린 것 없음
+    type: port_scan_closed
+    target: $host
+    top_ports: 100
+    timeout: 600
+  - name: 서비스 비활성화 상태 반영 (show ip service)
+    type: not_contains
+    command: show ip service
+    expected: "enabled"
+  - name: 감사로그에 비활성화 명령 기록
+    type: regex
+    command: show log swlog | grep -i "ip service"
+    pattern: 'cmd: ip service all admin-state disable, result: SUCCESS'
+    timeout: 90
+    reauth: true
+cleanup:
+  # Restore the baseline service posture explicitly rather than with
+  # `ip service all admin-state enable`: that would also switch on telnet,
+  # ftp and plain http, which the CIS suite (check_telnet_disabled.yaml,
+  # check_http_disabled.yaml) requires to stay off.
+  - action: cli
+    commands:
+      - ip service ssh admin-state enable
+      - ip service https admin-state enable
+      - ip service snmp admin-state enable
+      - ip service ntp admin-state enable
+      - ip service telnet admin-state disable
+      - ip service ftp admin-state disable
+      - ip service http admin-state disable
+continue_on_failure: false
+timeout: 600

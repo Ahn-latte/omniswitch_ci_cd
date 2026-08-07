@@ -1,14 +1,31 @@
 import re
 import time
 
-from switchtest.domain.enums import DeviceSafetyState, ResultStatus, TestAction
+from switchtest.domain.enums import DeviceSafetyState, ResultStatus, TestAction, ValidationType
 from switchtest.domain.results import TestResult, ValidationResult
 from switchtest.domain.runtime import RuntimeContext
-from switchtest.domain.testcase import TestCaseDefinition, TestStep
+from switchtest.domain.testcase import TestCaseDefinition, TestStep, ValidationStep
 from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import CleanupError, CommandExecutionError
 from switchtest.services.validation_service import ValidationService
 from switchtest.utils.time import utcnow
+
+
+SNMP_VALIDATIONS = {ValidationType.SNMP_GET, ValidationType.SNMP_SET, ValidationType.SNMP_DENIED}
+
+
+def _skipped_in_dry_run(validation: ValidationStep) -> bool:
+    """Which validations a dry run must not actually perform.
+
+    Command-backed ones because dry-run means "don't touch the device", and
+    all SNMP ones because two of them (`snmp_set`, and `snmp_denied` when it
+    attempts a write) change the device, and none of them should make a
+    YAML-level dry run depend on net-snmp being installed.
+
+    The plain network probes (ping/port_closed/tcp_blocked/web_unreachable)
+    still run: they are read-only and are often the thing being debugged.
+    """
+    return bool(validation.command) or validation.type in SNMP_VALIDATIONS
 
 
 class ExecutionService:
@@ -29,7 +46,7 @@ class ExecutionService:
             if testcase.setup:
                 context.device_state = DeviceSafetyState.MODIFIED
             for validation in testcase.validations:
-                if context.dry_run and validation.command:
+                if context.dry_run and _skipped_in_dry_run(validation):
                     result = ValidationResult(
                         name=validation.name,
                         status=ResultStatus.SKIPPED,
@@ -90,8 +107,9 @@ class ExecutionService:
                 if context.dry_run:
                     command_log.extend(f"DRY_RUN {command}" for command in step.commands)
                     continue
-                outputs = self.driver.apply_config(step.commands)
-                command_log.extend(f"CLI {command}" for command in step.commands)
+                outputs = self.driver.apply_config(step.commands, ignore_errors=step.ignore_errors)
+                marker = "CLI?" if step.ignore_errors else "CLI"
+                command_log.extend(f"{marker} {command}" for command in step.commands)
                 command_log.extend(f"OUT {output}" for output in outputs)
                 continue
             if step.action == TestAction.RESTORE_BASELINE:

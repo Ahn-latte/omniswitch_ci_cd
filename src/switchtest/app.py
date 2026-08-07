@@ -34,7 +34,13 @@ class RunArguments:
 def run_application(args: RunArguments) -> int:
     try:
         device = load_device_by_name(args.devices_file, args.device_name)
-        variables = {"expected_firmware": device.expected_firmware or "", "host": device.host}
+        variables = {"host": device.host}
+        # Only substitute a version the device entry actually declares. Passing
+        # "" instead would turn `pattern: "$expected_firmware"` into an empty
+        # pattern, which matches anything -- a firmware check that silently
+        # passes. Leaving the placeholder unsubstituted makes it fail visibly.
+        if device.expected_firmware:
+            variables["expected_firmware"] = device.expected_firmware
         suite, tests = load_suite_testcases(args.suite_path, variables=variables)
         context = RuntimeContext(
             run_id=make_run_id(),

@@ -1,6 +1,6 @@
-from switchtest.domain.enums import ResultStatus, TestAction
+from switchtest.domain.enums import ResultStatus, TestAction, ValidationType
 from switchtest.domain.runtime import RuntimeContext
-from switchtest.domain.testcase import TestCaseDefinition, TestStep
+from switchtest.domain.testcase import SnmpCredentials, TestCaseDefinition, TestStep, ValidationStep
 from switchtest.services.execution_service import ExecutionService
 from switchtest.services.validation_service import ValidationService
 
@@ -9,6 +9,7 @@ class StubDriver:
     def __init__(self, locked: bool = False) -> None:
         self.login_attempts: list[tuple[str, str]] = []
         self.applied_commands: list[str] = []
+        self.ignore_errors_flags: list[bool] = []
         self.locked = locked
 
     def connect(self) -> None: ...
@@ -22,8 +23,11 @@ class StubDriver:
             return f"Account lockout     = {'Yes' if self.locked else 'No'},"
         return ""
 
-    def apply_config(self, commands: list[str], timeout: int = 30) -> list[str]:
+    def apply_config(
+        self, commands: list[str], timeout: int = 30, ignore_errors: bool = False
+    ) -> list[str]:
         self.applied_commands.extend(commands)
+        self.ignore_errors_flags.append(ignore_errors)
         return []
 
     def restore_baseline(self, source: str | None = None) -> None: ...
@@ -103,3 +107,55 @@ def test_ensure_unlocked_leaves_an_unlocked_account_alone() -> None:
 
     assert driver.applied_commands == []
     assert any("already unlocked" in line for line in result.command_log)
+
+
+def test_cli_step_passes_ignore_errors_through_to_the_driver() -> None:
+    # Clearing leftovers from an interrupted run: deleting an account that
+    # isn't there is an error the setup has to tolerate. Ordinary steps must
+    # still fail loudly, or a testcase could "pass" without configuring
+    # anything.
+    driver = StubDriver()
+    service = ExecutionService(driver=driver, validation_service=ValidationService())
+    testcase = TestCaseDefinition(
+        id="TC-TEST-4",
+        name="snmp account setup",
+        description="",
+        feature="system",
+        setup=[
+            TestStep(action=TestAction.CLI, commands=["no user snmpv3"], ignore_errors=True),
+            TestStep(action=TestAction.CLI, commands=["user snmpv3 password x sha256+aes read-write all"]),
+        ],
+    )
+
+    result = service.run_test(_context(), testcase)
+
+    assert driver.ignore_errors_flags == [True, False]
+    assert result.command_log[0].startswith("CLI? no user snmpv3")
+
+
+def test_dry_run_skips_snmp_validations() -> None:
+    # snmp_set writes to the device, and a dry run must not -- nor should it
+    # need net-snmp installed just to check a suite loads.
+    driver = StubDriver()
+    service = ExecutionService(driver=driver, validation_service=ValidationService())
+    testcase = TestCaseDefinition(
+        id="TC-TEST-5",
+        name="snmp set",
+        description="",
+        feature="system",
+        validations=[
+            ValidationStep(
+                name="set sysName",
+                type=ValidationType.SNMP_SET,
+                target="192.0.2.1",
+                port=161,
+                oid="sysName.0",
+                value="X",
+                snmp=SnmpCredentials(user="snmpv3", auth_password="x"),
+            )
+        ],
+    )
+
+    result = service.run_test(_context(dry_run=True), testcase)
+
+    assert result.validation_results[0].status == ResultStatus.SKIPPED

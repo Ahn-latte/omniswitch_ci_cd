@@ -40,9 +40,14 @@ The project currently supports:
   - `equals`
   - `ping`
   - `port_closed`
+  - `port_scan_closed`
   - `web_unreachable`
   - `tls_version`
   - `tcp_blocked`
+  - `snmp_get`
+  - `snmp_set`
+  - `snmp_denied`
+- SNMPv3 checks driven through net-snmp (the automated form of a MIB browser),
 - JSON reporting,
 - JUnit XML reporting,
 - dry-run mode,
@@ -304,7 +309,21 @@ timeout: 60
 
 `setup`/`cleanup` steps support these `action` types:
 
-- `cli` — runs `commands` (a list of CLI strings) against the device.
+- `cli` — runs `commands` (a list of CLI strings) against the device. A command whose output contains an error marker fails the step, unless the step sets `ignore_errors: true` — which is for commands whose failure is acceptable, i.e. clearing leftovers from an interrupted run, where deleting something that isn't there is an error but not a problem:
+
+  ```yaml
+  setup:
+    - action: cli
+      ignore_errors: true       # may or may not exist yet
+      commands:
+        - no snmp station 192.168.1.10
+        - no user snmpv3
+    - action: cli               # this one must succeed
+      commands:
+        - user snmpv3 password ... sha256+aes read-write all allow-ssh enable
+  ```
+
+  Keep it off everywhere else: a setup command that fails silently leaves the testcase checking nothing. Steps that ran with it are logged as `CLI?` instead of `CLI`.
 - `wait` — sleeps `seconds`.
 - `save_config` — runs `write memory`.
 - `restore_baseline` — restores the device's configured baseline.
@@ -329,7 +348,23 @@ Supported validation types:
 - `ping`
   Runs a host-side ping check instead of a switch CLI command.
 - `port_closed`
-  Runs `nmap -Pn -p <port> <target>` from the automation host and passes when the reported state is anything other than `open` (i.e. `closed` or `filtered`). Use this to confirm at the network level that a service is actually unreachable, as a complement to CLI-reported `disabled` state (e.g. `check_telnet_disabled.yaml` checks `show ip service`, `check_telnet_port_closed.yaml` checks the wire). Requires an `nmap` binary on the machine running `switchtest`. Set `target` (often `$host`, see [Version Templating](#version-templating)) and `port`.
+  Runs `nmap -Pn -sT -p <port> <target>` from the automation host and passes when the reported state is anything other than `open` (i.e. `closed` or `filtered`). Set `protocol: udp` to scan with `-sU` instead — needed for SNMP on 161, since it doesn't answer on TCP at all. Two caveats specific to UDP: the scan needs raw-socket privileges (an **elevated** `cmd` on Windows, root on Linux) or nmap can't determine a state and the validation errors out, and a silent UDP port is reported `open|filtered` rather than `closed`, so "not open" is the strongest thing this can assert there. Use this to confirm at the network level that a service is actually unreachable, as a complement to CLI-reported `disabled` state (e.g. `check_telnet_disabled.yaml` checks `show ip service`, `check_telnet_port_closed.yaml` checks the wire). Requires an `nmap` binary on the machine running `switchtest`. Set `target` (often `$host`, see [Version Templating](#version-templating)) and `port`.
+- `port_scan_closed`
+  Runs one `nmap -Pn -sS -sU --top-ports <n> -T4 -v <target>` and passes when **none** of the scanned ports is `open`. `--top-ports` counts per protocol, so `top_ports: 100` (the default) means the 100 most common TCP ports *and* the 100 most common UDP ports — which covers 22/23/80/443 and 161/162/123. Any port that is still open is named in the result message, so a failure says which service is still listening.
+
+  ```yaml
+  - name: 포트스캔 - 상위 100개 tcp/udp 포트 중 열린 것 없음
+    type: port_scan_closed
+    target: $host
+    top_ports: 100
+    timeout: 600
+  ```
+
+  - **Must run elevated.** `-sS` and `-sU` both need raw sockets; from an ordinary shell nmap refuses the scan, and the validation errors out rather than reporting a falsely clean result.
+  - `open|filtered` — what a silent UDP port looks like — is not counted as open.
+  - `-Pn` matters more here than for `port_closed`: a device with every service switched off may not answer host discovery either, and nmap would otherwise skip it as "down", which would look like "nothing open" for the wrong reason.
+  - Set a generous `timeout` (the testcase uses 600s). UDP scanning is bounded by the target's ICMP rate limiting, not by nmap; the timeout message says so.
+  - This is a **bounded smoke check, not proof about all 65535 ports** — a service on an uncommon port is outside what it sees. Use `port_closed` when a specific port must be named in the evidence, and this when the claim is "nothing common is listening" (see [check_ip_service_disabled_enforcement.yaml](testcases/secfunc/check_ip_service_disabled_enforcement.yaml)). Full-range UDP (`-p-`) is deliberately not offered: it takes hours and `-T5` would just abort at its 15-minute host timeout.
 - `web_unreachable`
   Launches headless Chromium via Playwright and navigates to `http://<target>:<port>/` (or `https://` when `port` is `443`), passing when the navigation itself fails (connection refused/timed out) rather than returning any response. Use this to confirm at the browser/application layer that WebView is actually unreachable once HTTP/HTTPS is disabled (e.g. `check_http_disabled.yaml`/`check_https_enabled.yaml` check `show ip service`, `check_http_web_unreachable.yaml`/`check_https_web_unreachable.yaml` check that a browser can't load the page). Requires the `web` extra (`pip install -e .[web]`) and a one-time `playwright install chromium` on the machine running `switchtest` — that install step needs internet access, but running the check afterwards does not. Set `target` (often `$host`) and `port` (`80` or `443`).
 
@@ -339,6 +374,33 @@ Supported validation types:
   Every run keeps its evidence — the `.pcapng` (openable directly in Wireshark) and a human-readable `-V` dissection of the `ServerHello` packet (`.txt`, same name) are both saved to `reports/captures/` (gitignored, one pair per run, named `tls_<target>_<port>_<UTC timestamp>.pcapng`/`.txt`) regardless of pass/fail. The saved `.pcapng` path is also included in the validation's `observed` field in the JSON/console report, so it's traceable back from a specific test run's result.
 - `tcp_blocked`
   Opens a plain TCP connection to `target:port` from the machine running `switchtest` and passes when it *can't* be established — dropped (timeout) or refused. Use it to confirm that this host is being blocked at the network level, e.g. after an IP ban ([check_ip_ban_enforcement_ssh.yaml](testcases/secfunc/check_ip_ban_enforcement_ssh.yaml) uses it to show that a banned source IP can no longer reach tcp/22, which is what `ssh_dispatch_run_fatal: ... Connection timed out` looks like from the client side). Distinct from `port_closed`, which asks nmap whether a service is listening at all; this asks whether *this machine* can still reach a service that is otherwise up. Set `target` (often `$host`), `port`, and `timeout` (how long to wait before calling it dropped). No external tools needed.
+
+- `snmp_get` / `snmp_set` / `snmp_denied`
+  Talk to the switch's SNMP agent over UDP/161 with net-snmp (`snmpget`/`snmpset`), i.e. the automatable form of the MIB-browser workflow: the user, security level, auth/privacy algorithms and passwords a browser asks for in a dialog become an `snmp:` block on the validation. Requires net-snmp on `PATH` on the machine running `switchtest` (Windows: the Net-SNMP installer; Linux: the `snmp` package). See [check_snmpv3_get_set_permissions.yaml](testcases/secfunc/check_snmpv3_get_set_permissions.yaml).
+
+  ```yaml
+  - name: rw 계정으로 sysName.0 set (원래 값 자동 복구)
+    type: snmp_set
+    target: $host
+    port: 161
+    oid: sysName.0
+    value: "OS6900-SNMPTEST"
+    value_type: s          # net-snmp type letter: s string, i integer, ...
+    snmp:
+      user: snmpv3
+      level: authPriv      # authPriv | authNoPriv | noAuthNoPriv
+      auth_protocol: SHA-256
+      priv_protocol: AES
+      auth_password: "..."      # or auth_password_env: SWITCH_SNMP_PASSWORD
+      # priv_password defaults to the auth password, which is what an AOS
+      # account created as `sha256+aes` actually uses.
+  ```
+
+  - `snmp_get` passes when the object reads back and matches `expected` (exact) or `pattern` (regex); with neither, any value passes. The value read is kept in the result's `observed` field, so a run's JSON report records what the device actually reported — `sysName.0` for the device name and `sysDescr.0` for the OS version (the same string `show system` prints as `Description`, so `pattern: "$expected_firmware"` checks the running release without hardcoding it).
+  - `snmp_set` reads the current value, writes `value`, confirms it reads back, **and then puts the original value back**. Restoring in the validation rather than in `cleanup` keeps the object modified for the shortest possible window and means the testcase doesn't have to hardcode whatever the device happened to be set to. If the restore fails, the validation errors rather than quietly leaving the device changed.
+  - `snmp_denied` asserts the agent refuses this account: with a `value` it attempts a SET (the read-only-account case), without one a GET. An explicit refusal (`notWritable`, `noAccess`, USM authentication failure) passes. No answer at all also passes but is flagged in the result message, since it can equally mean SNMP is switched off or the request was filtered. If the write unexpectedly succeeds, the original value is restored before the validation reports the failure.
+
+  Passwords may be inline (`auth_password`) or from the environment (`auth_password_env`). Inline is reasonable for the throwaway accounts a testcase creates and deletes itself, as `check_snmpv3_get_set_permissions.yaml` does; use the env form for anything longer lived. Either way the values are redacted out of validation output before it reaches the reports.
 
 #### `tls_version` setup on Windows
 
@@ -368,6 +430,8 @@ set SWITCHTEST_CAPTURE_INTERFACE=이더넷
 Each validation also supports:
 
 - `timeout` — per-command timeout in seconds (default `30`). Bump this for commands that return large output (e.g. `show log swlog`).
+- `protocol` — `tcp` (default) or `udp`, for `port_closed`.
+- `top_ports` — how many of the most common ports to scan per protocol (default `100`), for `port_scan_closed`.
 - `reauth` — set to `true` when the switch prompts for the account's password again before returning this command's output (observed on this device for privileged/audit-log commands such as `show log swlog`). The driver answers the prompt with the same password used to log in. Leave `false` for ordinary `show` commands.
 
 ## Version Templating
@@ -397,7 +461,7 @@ validations:
 Notes:
 - This only substitutes `expected`/`pattern`/`target` fields inside `validations`, not `command` or `setup`/`cleanup` steps.
 - `validate-testcase`/`validate-suite` don't have a device context, so they leave `$expected_firmware`/`$host` as a literal string — that's expected, it's still valid YAML/schema. Only `run` (which always has a `--device`) performs the substitution.
-- If a device has no `expected_firmware` set, `$expected_firmware` resolves to an empty string, so any testcase referencing it will fail its `contains`/`equals` check against that device — set `expected_firmware` on any device you intend to run firmware-version testcases against.
+- If a device has no `expected_firmware` set, `$expected_firmware` is left unsubstituted, so any testcase referencing it fails visibly against that device — set `expected_firmware` on any device you intend to run firmware-version testcases against. (It is deliberately *not* replaced with an empty string: an empty `pattern` matches anything, which would turn a missing version into a silently passing check.)
 - Model name (`OS6900-X48C6`, etc.) is not templated because no testcase checks it — it only shows up as informational metadata (`show system` → `Model:` in the summary/report).
 
 ## Suites
@@ -436,6 +500,8 @@ tests:
 | `suite8.yaml` | 8.x | Audit |
 | `secfunc_auto.yaml` | 5.x / 8.x | Boot self-test and audit-generation checks runnable under the normal admin device (overlaps `suite5`/`suite8`; not yet consolidated) |
 | `secfunc_lowpriv.yaml` | 8.4.1 | Audit access-restriction check — **must** run with `--device lowpriv`, never an admin account, or the check is meaningless |
+| `secfunc_service_disable.yaml` | 4.1 | Remote-service disable *enforcement* — **must** run with `--device secureadmin` (serial console). It switches off every IP service, so SSH/API/WebView all go dead for the duration; see [Example 6](#example-6-run-the-service-disable-enforcement-check) |
+| `secfunc_snmp.yaml` | 4.x | SNMPv3 account/station creation + audit (TC-SM-42) and net-snmp get/set permission checks (TC-SM-43) — **must** run with `--device secureadmin`; see [Example 7](#example-7-run-the-snmpv3-checks) |
 | `secfunc_lockout.yaml` | 1.3.3 / 1.3.4 | Account-lockout and IP-ban *enforcement* checks — **must** run with `--device secureadmin`, which is attached over the **serial console**. They lock `admin1`, so the suite can't be connected as `admin1` (that would lock its own session), and reading swlog needs secureadmin. The IP-ban testcase bans this machine's own IP; see [Example 5](#example-5-run-the-account-lockout-and-ip-ban-enforcement-checks) |
 
 ## Example Workflows
@@ -517,6 +583,33 @@ venv\Scripts\python.exe scripts\verify_failed_login_counting.py
 ```
 
 It reads `admin1`'s `Password bad attempts` counter, makes a single failed login, and reports the delta — expected `1`.
+
+### Example 6: Run the service-disable enforcement check
+
+Needs the serial console cable (the `secureadmin` device entry) and `nmap`. Run it from an **elevated** `cmd`: the port scan uses `-sS -sU`, which needs raw-socket privileges.
+
+```cmd
+set SWITCH_SECUREADMIN_PASSWORD=...
+venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_service_disable.yaml --report-dir reports --json reports\secfunc_41b_result.json
+```
+
+**TC-SM-41B** runs `ip service all admin-state disable`, then proves the switch really stopped answering: tcp/22 and tcp/443 can't be connected to (`tcp_blocked`), a browser can't load WebView (`web_unreachable`), one `nmap -sS -sU --top-ports 100 -T4` finds nothing open across the 100 most common TCP *and* UDP ports (`port_scan_closed`), `show ip service` no longer says `enabled`, and swlog carries `cmd: ip service all admin-state disable, result: SUCCESS`. Cleanup restores the baseline service posture explicitly (ssh/https/snmp/ntp back on; telnet/ftp/http stay off) rather than blanket-enabling everything, which would switch on services the CIS suite requires disabled.
+
+⚠️ **This one takes the switch off the network for the duration.** Only the console session survives it, which is why `--device secureadmin` is mandatory. If cleanup doesn't run, re-enable from the console: `ip service ssh admin-state enable`, `ip service https admin-state enable`.
+
+### Example 7: Run the SNMPv3 checks
+
+Needs the serial console cable and, for TC-SM-43, net-snmp on `PATH` (`snmpget -V` should work):
+
+```cmd
+set SWITCH_SECUREADMIN_PASSWORD=...
+venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_snmp.yaml --report-dir reports --json reports\secfunc_snmp_result.json
+```
+
+- **TC-SM-42** creates an SNMPv3 account (`sha256+aes`, read-write) and a trap station from the console, then confirms both commands landed in swlog as `result: SUCCESS` — the station command's success being the point of the check — and that `show snmp station` / `show user snmpv3` reflect them. Cleanup deletes both.
+- **TC-SM-43** is the MIB-browser workflow, automated: net-snmp sends SNMPv3 authPriv (SHA-256 + AES) requests to UDP/161 and checks that the read-write account can `get` and `set` `sysName.0`, that the read-only account can `get` but is **refused** on `set`, and that `sysName` is back to its original value afterwards. It creates and deletes its own accounts, so it doesn't depend on TC-SM-42 having run.
+
+Both testcases pre-clean with an `ignore_errors` step, so an interrupted earlier run that left `snmpv3`/`snmpv3ro` behind doesn't break the next one. The station IP (`192.168.1.10`, the trap receiver = this machine) and the expected `sysName` (`OS6900`) are lab-specific — change them in the testcase YAML if the lab differs.
 
 ## How To Add A New Testcase
 

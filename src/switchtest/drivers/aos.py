@@ -105,8 +105,12 @@ class AOSSwitchDriver(BaseSwitchDriver):
         )
         return _clean_show_output(output, command)
 
-    def apply_config(self, commands: list[str], timeout: int = 30) -> list[str]:
+    def apply_config(
+        self, commands: list[str], timeout: int = 30, ignore_errors: bool = False
+    ) -> list[str]:
         outputs = self._transport().send_commands(commands, timeout=timeout)
+        if ignore_errors:
+            return outputs
         for output in outputs:
             if any(marker in output.lower() for marker in ["invalid input", "incomplete command", "error"]):
                 raise CommandExecutionError(f"Device rejected configuration command: {output}")
