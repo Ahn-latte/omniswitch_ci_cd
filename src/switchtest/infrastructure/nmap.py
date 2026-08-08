@@ -1,5 +1,7 @@
 import re
 import subprocess
+import threading
+from typing import Callable
 
 from switchtest.exceptions import ValidationExecutionError
 
@@ -58,6 +60,7 @@ def scan_top_ports(
     top_ports: int = 100,
     timeout: int = 600,
     timing: str = "T4",
+    on_progress: Callable[[str], None] | None = None,
 ) -> tuple[list[str], str]:
     """Scan the most common TCP and UDP ports at once; return (open_ports, summary).
 
@@ -78,6 +81,10 @@ def scan_top_ports(
 
     `--top-ports` is a bounded smoke check, not proof about all 65535 ports.
     A service parked on an uncommon port is outside what this can see.
+
+    `on_progress` is called with each line of nmap output as it arrives, for
+    callers that want to show the scan advancing rather than a silent wait.
+    It does not affect the returned result.
     """
     if not target:
         raise ValidationExecutionError("Port scan validation requires a target")
@@ -90,25 +97,23 @@ def scan_top_ports(
         str(top_ports),
         f"-{timing}",
         "-v",
+        # Left on regardless of `on_progress`: unprompted, nmap only reports
+        # percentages once a phase already looks slow, so a caller watching
+        # the output would see nothing for the first stretch of the scan.
+        # These lines are filtered back out of the reported summary.
+        "--stats-every",
+        "2s",
         target,
     ]
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise ValidationExecutionError("nmap utility is not available") from exc
+        raw_output = _run_streaming(command, timeout=timeout, on_progress=on_progress)
     except subprocess.TimeoutExpired as exc:
         raise ValidationExecutionError(
             f"nmap top-{top_ports} scan of {target} timed out after {timeout} seconds. "
             f"UDP scanning is bounded by the target's ICMP rate limiting -- raise the "
             f"validation timeout or lower top_ports."
         ) from exc
-    output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+    output = raw_output.strip()
     port_lines = _PORT_STATE_RE.findall(output)
     summary_line = _ALL_PORTS_RE.search(output)
     if not port_lines and not summary_line:
@@ -122,6 +127,60 @@ def scan_top_ports(
         if state == "open"
     ]
     return open_ports, _summarize(output, top_ports)
+
+
+def _run_streaming(
+    command: list[str],
+    timeout: int,
+    on_progress: Callable[[str], None] | None,
+) -> str:
+    """Run nmap, handing each line to `on_progress` as it is printed, and
+    return everything it wrote.
+
+    subprocess.run cannot do this: it only surfaces output once the process
+    has exited, which for a UDP scan is the whole point at which progress
+    stopped being useful. stderr is merged into stdout so the ordering the
+    caller sees matches what nmap actually printed.
+
+    The reader runs on a thread so the timeout is enforced by waiting on the
+    process itself; draining the pipe inline would hang past the deadline if
+    nmap went quiet.
+    """
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError as exc:
+        raise ValidationExecutionError("nmap utility is not available") from exc
+
+    lines: list[str] = []
+
+    def _pump() -> None:
+        if process.stdout is None:
+            return
+        for line in process.stdout:
+            lines.append(line)
+            if on_progress is not None:
+                on_progress(line.rstrip("\r\n"))
+
+    reader = threading.Thread(target=_pump, daemon=True)
+    reader.start()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Killing the child closes the pipe, which ends the reader's loop.
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        reader.join(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
+    return "".join(lines)
 
 
 def _summarize(output: str, top_ports: int) -> str:

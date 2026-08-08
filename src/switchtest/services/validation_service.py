@@ -9,6 +9,7 @@ from switchtest.exceptions import ValidationExecutionError
 from switchtest.infrastructure.api_probe import check_api_unreachable
 from switchtest.infrastructure.nmap import scan_port, scan_top_ports
 from switchtest.infrastructure.ping import ping_target
+from switchtest.infrastructure.reporting.progress import NmapProgressRenderer
 from switchtest.infrastructure.secrets import get_required_secret
 from switchtest.infrastructure.snmp import SnmpResult, SnmpV3Params, redact, snmp_get, snmp_set
 from switchtest.infrastructure.tcp_probe import probe_tcp
@@ -121,12 +122,17 @@ class ValidationService:
     ) -> ValidationResult:
         """One scan across the most common TCP and UDP ports; passes when none
         of them is open. Any port that is open is named in the message, so a
-        failure says which service is still listening."""
-        open_ports, summary = scan_top_ports(
-            validation.target or "",
-            top_ports=validation.top_ports,
-            timeout=validation.timeout,
-        )
+        failure says which service is still listening.
+
+        This is the one validation that can run for minutes, so it reports its
+        progress to the console while it works."""
+        with NmapProgressRenderer(validation.target or "", validation.top_ports) as progress:
+            open_ports, summary = scan_top_ports(
+                validation.target or "",
+                top_ports=validation.top_ports,
+                timeout=validation.timeout,
+                on_progress=progress.handle_line,
+            )
         scope = f"top {validation.top_ports} tcp and udp ports on {validation.target}"
         return ValidationResult(
             name=validation.name,

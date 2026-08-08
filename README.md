@@ -365,6 +365,14 @@ Supported validation types:
   - `open|filtered` — what a silent UDP port looks like — is not counted as open.
   - `-Pn` matters more here than for `port_closed`: a device with every service switched off may not answer host discovery either, and nmap would otherwise skip it as "down", which would look like "nothing open" for the wrong reason.
   - Set a generous `timeout` (the testcase uses 600s). UDP scanning is bounded by the target's ICMP rate limiting, not by nmap; the timeout message says so.
+  - **It shows its progress while it runs.** This is the one validation that can take minutes, so nmap's output is streamed rather than collected at the end, and each scan phase is drawn as a live bar (`--stats-every 2s` keeps the updates coming; those lines are filtered back out of the reported summary):
+
+    ```
+      nmap: scanning top 100 tcp+udp ports on 192.168.1.1
+      UDP Scan [##########--------------]  45.0%  ETA 0:00:11
+    ```
+
+    The percentage is nmap's own **per-phase** figure — the SYN pass first, then the UDP one — not a combined number, because the UDP phase can run many times longer than the SYN one. On a terminal the line redraws in place; when output is redirected (CI logs, `> run.txt`) it prints one line per phase per 10% step instead, so the log stays readable.
   - This is a **bounded smoke check, not proof about all 65535 ports** — a service on an uncommon port is outside what it sees. Use `port_closed` when a specific port must be named in the evidence, and this when the claim is "nothing common is listening" (see [check_ip_service_disabled_enforcement.yaml](testcases/secfunc/check_ip_service_disabled_enforcement.yaml)). Full-range UDP (`-p-`) is deliberately not offered: it takes hours and `-T5` would just abort at its 15-minute host timeout.
 - `web_unreachable`
   Launches headless Chromium via Playwright and navigates to `http://<target>:<port>/` (or `https://` when `port` is `443`), passing when the navigation itself fails (connection refused/timed out) rather than returning any response. Use this to confirm at the browser/application layer that WebView is actually unreachable once HTTP/HTTPS is disabled (e.g. `check_http_disabled.yaml`/`check_https_enabled.yaml` check `show ip service`, `check_http_web_unreachable.yaml`/`check_https_web_unreachable.yaml` check that a browser can't load the page). Requires the `web` extra (`pip install -e .[web]`) and a one-time `playwright install chromium` on the machine running `switchtest` — that install step needs internet access, but running the check afterwards does not. Set `target` (often `$host`) and `port` (`80` or `443`).
