@@ -1,10 +1,10 @@
 id: TC-SM-43
 name: SNMPv3 get/set works for read-write and is refused for read-only
 description: >-
-  net-snmp로 SNMPv3(authPriv, SHA-256 + AES) 요청을 UDP/161로 보내 sysName.0 을 읽고
+  SNMPv3(authPriv, SHA-256 + AES) 요청을 UDP/161로 보내 sysName.0 을 읽고
   쓰는 것이 read-write 계정에서는 동작하고, read-only 계정에서는 쓰기가 거부되는지 검증.
   MIB 브라우저로 하던 절차(계정/알고리즘/비밀번호를 넣어 agent 프로필을 만들고 get/set)를
-  자동화한 것으로, 브라우저가 대화상자로 받던 값이 그대로 snmpget/snmpset 인자가 됨. (4.x)
+  자동화한 것으로, 브라우저가 대화상자로 받던 값이 그대로 이 시험의 snmp 블록이 됨. (4.x)
 
   검증 항목:
     1) rw 계정으로 sysName.0 get -> show system 의 Name(OS6900)과 일치
@@ -17,8 +17,12 @@ description: >-
   set 검증은 원래 값을 먼저 읽어두고 확인 후 되돌리므로, 시험이 sysName을 바꾼 채로
   끝나지 않음. cleanup의 system name OS6900 은 그 복구가 실패했을 때를 위한 이중 안전장치임.
 
-  준비물: net-snmp가 PATH에 있어야 함(snmpget/snmpset). Windows는 Net-SNMP 설치본,
-  Linux는 snmp 패키지. 스위치의 ip service snmp 가 enabled 여야 함.
+  준비물: 별도 설치 도구 없음 - SNMP는 pysnmp로 나가며 pip install -e . 로 함께 설치됨
+  (cryptography 포함. 없으면 authPriv 요청이 전부 Ciphering services not available 로 실패함).
+  net-snmp CLI를 쓰지 않는 이유는 이 계정이 SHA-256을 쓰는데 net-snmp는 5.8부터 지원하고,
+  공식 Windows 빌드가 그보다 오래됐기 때문. 스위치의 ip service snmp 가 enabled 여야 함.
+  각 요청은 실행 중 콘솔에 한 줄씩 출력됨 - set 검증이 내부적으로 하는 원본 읽기/되돌리기까지
+  보이므로, MIB 브라우저로 클릭하던 순서를 그대로 눈으로 따라갈 수 있음.
 
   반드시 --device secureadmin 으로 실행할 것 - 계정 생성/삭제와 swlog 열람이 secureadmin
   권한이고, 이 엔트리가 시리얼 콘솔(transport: serial)로 붙음. SNMP 요청 자체는 콘솔이 아니라

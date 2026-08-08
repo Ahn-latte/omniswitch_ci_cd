@@ -9,13 +9,23 @@ from switchtest.exceptions import ValidationExecutionError
 from switchtest.infrastructure.api_probe import check_api_unreachable
 from switchtest.infrastructure.nmap import scan_port, scan_top_ports
 from switchtest.infrastructure.ping import ping_target
-from switchtest.infrastructure.reporting.progress import NmapProgressRenderer
+from switchtest.infrastructure.reporting.progress import NmapProgressRenderer, SnmpTranscriptRenderer
 from switchtest.infrastructure.secrets import get_required_secret
-from switchtest.infrastructure.snmp import SnmpResult, SnmpV3Params, redact, snmp_get, snmp_set
+from switchtest.infrastructure.snmp import (
+    SnmpResult,
+    SnmpV3Params,
+    observing,
+    redact,
+    snmp_get,
+    snmp_set,
+)
 from switchtest.infrastructure.tcp_probe import probe_tcp
 from switchtest.infrastructure.tls_capture import capture_tls_version
 from switchtest.infrastructure.web_probe import check_web_unreachable
 from switchtest.utils.text import normalize_cli_output
+
+
+_SNMP_VALIDATIONS = {ValidationType.SNMP_GET, ValidationType.SNMP_SET, ValidationType.SNMP_DENIED}
 
 
 class ValidationService:
@@ -37,6 +47,11 @@ class ValidationService:
             ValidationType.SNMP_DENIED: self._validate_snmp_denied,
         }
         handler = handlers[validation.type]
+        if validation.type in _SNMP_VALIDATIONS:
+            # Wrapped here rather than inside each handler so the read-back and
+            # restore that snmp_set/snmp_denied perform are shown too.
+            with observing(SnmpTranscriptRenderer().handle):
+                return handler(driver, validation)
         return handler(driver, validation)
 
     def _validate_contains(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:

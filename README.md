@@ -48,7 +48,7 @@ The project currently supports:
   - `snmp_get`
   - `snmp_set`
   - `snmp_denied`
-- SNMPv3 checks driven through net-snmp (the automated form of a MIB browser),
+- SNMPv3 checks driven through pysnmp (the automated form of a MIB browser),
 - JSON reporting,
 - JUnit XML reporting,
 - dry-run mode,
@@ -391,7 +391,22 @@ Supported validation types:
   Opens a plain TCP connection to `target:port` from the machine running `switchtest` and passes when it *can't* be established — dropped (timeout) or refused. Use it to confirm that this host is being blocked at the network level, e.g. after an IP ban ([check_ip_ban_enforcement_ssh.yaml](testcases/secfunc/check_ip_ban_enforcement_ssh.yaml) uses it to show that a banned source IP can no longer reach tcp/22, which is what `ssh_dispatch_run_fatal: ... Connection timed out` looks like from the client side). Distinct from `port_closed`, which asks nmap whether a service is listening at all; this asks whether *this machine* can still reach a service that is otherwise up. Set `target` (often `$host`), `port`, and `timeout` (how long to wait before calling it dropped). No external tools needed.
 
 - `snmp_get` / `snmp_set` / `snmp_denied`
-  Talk to the switch's SNMP agent over UDP/161 with net-snmp (`snmpget`/`snmpset`), i.e. the automatable form of the MIB-browser workflow: the user, security level, auth/privacy algorithms and passwords a browser asks for in a dialog become an `snmp:` block on the validation. Requires net-snmp on `PATH` on the machine running `switchtest` (Windows: the Net-SNMP installer; Linux: the `snmp` package). See [check_snmpv3_get_set_permissions.yaml](testcases/secfunc/check_snmpv3_get_set_permissions.yaml).
+  Talk to the switch's SNMP agent over UDP/161 with SNMPv3, i.e. the automatable form of the MIB-browser workflow: the user, security level, auth/privacy algorithms and passwords a browser asks for in a dialog become an `snmp:` block on the validation. Needs no external tool: SNMP goes through **pysnmp**, which `pip install -e .` brings in along with `cryptography` (pysnmp itself only requires `pyasn1`, and without a crypto backend every `authPriv` request fails with `Ciphering services not available` — hence both are hard dependencies). net-snmp's command-line tools are deliberately *not* used: the accounts under test authenticate with SHA-256, which net-snmp only supports from 5.8, newer than any official Net-SNMP build for Windows.
+
+  Each request is printed as it happens, so a run shows the exchange the way a MIB browser would — including the read-back and restore that `snmp_set` performs, which have no other trace:
+
+  ```
+    snmp: v3 authPriv SHA-256/AES as 'snmpv3' -> 192.168.1.1:161
+      GET sysName.0                    OS6900                            (0.04s)
+      SET sysName.0 = OS6900-SNMPTEST  OS6900-SNMPTEST                   (0.05s)
+      SET sysName.0 = OS6900           OS6900                            (0.04s)
+    snmp: v3 authPriv SHA-256/AES as 'snmpv3ro' -> 192.168.1.1:161
+      SET sysName.0 = OS6900-DENIED    -> refused: notWritable at SNM...  (0.06s)
+  ```
+
+  The header reappears whenever the account or endpoint changes, which is what separates the read-write half of a testcase from the read-only half. Passwords never reach the console or the report. See [check_snmpv3_get_set_permissions.yaml](testcases/secfunc/check_snmpv3_get_set_permissions.yaml).
+
+  `oid` accepts three spellings: a bare `sysName.0` (resolved against `SNMPv2-MIB`), an explicit `MODULE::object.index`, or a numeric OID.
 
   ```yaml
   - name: rw 계정으로 sysName.0 set (원래 값 자동 복구)
@@ -400,7 +415,7 @@ Supported validation types:
     port: 161
     oid: sysName.0
     value: "OS6900-SNMPTEST"
-    value_type: s          # net-snmp type letter: s string, i integer, ...
+    value_type: s          # type letter (net-snmp spelling): s string, i integer, ...
     snmp:
       user: snmpv3
       level: authPriv      # authPriv | authNoPriv | noAuthNoPriv
@@ -517,7 +532,7 @@ tests:
 | `secfunc_auto.yaml` | 5.x / 8.x | Boot self-test and audit-generation checks runnable under the normal admin device (overlaps `suite5`/`suite8`; not yet consolidated) |
 | `secfunc_lowpriv.yaml` | 8.4.1 | Audit access-restriction check — **must** run with `--device lowpriv`, never an admin account, or the check is meaningless |
 | `secfunc_service_disable.yaml` | 4.1 | Remote-service disable *enforcement* — **must** run with `--device secureadmin` (serial console). It switches off every IP service, so SSH/API/WebView all go dead for the duration; see [Example 6](#example-6-run-the-service-disable-enforcement-check) |
-| `secfunc_snmp.yaml` | 4.x | SNMPv3 account/station creation + audit (TC-SM-42) and net-snmp get/set permission checks (TC-SM-43) — **must** run with `--device secureadmin`; see [Example 7](#example-7-run-the-snmpv3-checks) |
+| `secfunc_snmp.yaml` | 4.x | SNMPv3 account/station creation + audit (TC-SM-42) and SNMPv3 get/set permission checks (TC-SM-43) — **must** run with `--device secureadmin`; see [Example 7](#example-7-run-the-snmpv3-checks) |
 | `secfunc_lockout.yaml` | 1.3.3 / 1.3.4 | Account-lockout and IP-ban *enforcement* checks — **must** run with `--device secureadmin`, which is attached over the **serial console**. They lock `admin1`, so the suite can't be connected as `admin1` (that would lock its own session), and reading swlog needs secureadmin. The IP-ban testcase bans this machine's own IP; see [Example 5](#example-5-run-the-account-lockout-and-ip-ban-enforcement-checks) |
 
 ## Example Workflows
@@ -615,7 +630,7 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_service_
 
 ### Example 7: Run the SNMPv3 checks
 
-Needs the serial console cable and, for TC-SM-43, net-snmp on `PATH` (`snmpget -V` should work):
+Needs the serial console cable. TC-SM-43 needs no extra tooling — SNMP runs through pysnmp, installed by `pip install -e .`.
 
 ```cmd
 set SWITCH_SECUREADMIN_PASSWORD=...
@@ -623,7 +638,7 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_snmp.yam
 ```
 
 - **TC-SM-42** creates an SNMPv3 account (`sha256+aes`, read-write) and a trap station from the console, then confirms both commands landed in swlog as `result: SUCCESS` — the station command's success being the point of the check — and that `show snmp station` / `show user snmpv3` reflect them. Cleanup deletes both.
-- **TC-SM-43** is the MIB-browser workflow, automated: net-snmp sends SNMPv3 authPriv (SHA-256 + AES) requests to UDP/161 and checks that the read-write account can `get` and `set` `sysName.0`, that the read-only account can `get` but is **refused** on `set`, and that `sysName` is back to its original value afterwards. It creates and deletes its own accounts, so it doesn't depend on TC-SM-42 having run.
+- **TC-SM-43** is the MIB-browser workflow, automated: pysnmp sends SNMPv3 authPriv (SHA-256 + AES) requests to UDP/161 and checks that the read-write account can `get` and `set` `sysName.0`, that the read-only account can `get` but is **refused** on `set`, and that `sysName` is back to its original value afterwards. It creates and deletes its own accounts, so it doesn't depend on TC-SM-42 having run.
 
 Both testcases pre-clean with an `ignore_errors` step, so an interrupted earlier run that left `snmpv3`/`snmpv3ro` behind doesn't break the next one. The station IP (`192.168.1.10`, the trap receiver = this machine) and the expected `sysName` (`OS6900`) are lab-specific — change them in the testcase YAML if the lab differs.
 

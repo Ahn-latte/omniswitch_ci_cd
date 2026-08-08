@@ -1,10 +1,10 @@
 name: secfunc_snmp
 description: >-
-  SNMPv3 계정/스테이션 생성 감사(TC-SM-42)와 net-snmp를 통한 get/set 권한 시험(TC-SM-43).
+  SNMPv3 계정/스테이션 생성 감사(TC-SM-42)와 get/set 권한 시험(TC-SM-43).
   반드시 --device secureadmin 으로 실행 - 계정 생성/삭제와 swlog 열람이 secureadmin 권한이고,
   해당 엔트리는 시리얼 콘솔(transport: serial)로 붙음. 두 시험은 각자 계정을 만들고 지우므로
-  순서에 의존하지 않으며 단독 실행도 가능함. TC-SM-43은 net-snmp(snmpget/snmpset)가 PATH에
-  있어야 하고, SNMP 요청은 콘솔이 아니라 네트워크(UDP/161)로 나감.
+  순서에 의존하지 않으며 단독 실행도 가능함. TC-SM-43의 SNMP 요청은 pysnmp로 나가므로 별도
+  설치가 필요 없고, 콘솔이 아니라 네트워크(UDP/161)를 탐.
 tests:
   - ../testcases/secfunc/check_snmpv3_account_station.yaml
   - ../testcases/secfunc/check_snmpv3_get_set_permissions.yaml

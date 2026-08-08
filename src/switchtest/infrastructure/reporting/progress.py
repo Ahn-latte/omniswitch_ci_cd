@@ -1,9 +1,12 @@
 import re
 import sys
 from types import TracebackType
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import typer
+
+if TYPE_CHECKING:  # imported for typing only, so this module stays free of pysnmp
+    from switchtest.infrastructure.snmp import SnmpExchange, SnmpResult
 
 # nmap -v announces each scan phase, then reports progress within that phase.
 # The percentage is per phase, never for the run as a whole.
@@ -111,3 +114,58 @@ class NmapProgressRenderer:
 
 def _echo_without_newline(text: str) -> None:
     typer.echo(text, nl=False)
+
+
+class SnmpTranscriptRenderer:
+    """Print each SNMP request as it happens, MIB-browser style.
+
+    Unlike the port scan there is no progress to report -- individual requests
+    finish in milliseconds -- so what is worth showing is the *sequence*: which
+    account asked for what, and what the agent answered. That makes the parts
+    of an `snmp_set` validation that have no other trace visible, namely the
+    read of the original value, the read-back after the write, and the restore.
+
+    A header is printed whenever the account or endpoint changes, which is
+    what separates the read-write half of a testcase from the read-only half.
+    """
+
+    _VALUE_WIDTH = 46
+
+    def __init__(self, echo: Callable[[str], None] | None = None) -> None:
+        self._echo = echo if echo is not None else typer.echo
+        self._context: tuple[str, str] | None = None
+
+    def handle(self, exchange: "SnmpExchange") -> None:
+        context = (exchange.endpoint, exchange.profile)
+        if context != self._context:
+            self._echo(f"  snmp: {exchange.profile} -> {exchange.endpoint}")
+            self._context = context
+        request = exchange.oid
+        if exchange.written is not None:
+            request = f"{request} = {exchange.written}"
+        self._echo(
+            f"    {exchange.operation:<3} {request:<28} "
+            f"{_outcome(exchange.result):<{self._VALUE_WIDTH}} ({exchange.seconds:.2f}s)".rstrip()
+        )
+
+
+def _outcome(result: "SnmpResult") -> str:
+    """One-line verdict. A refusal is spelled out because for the read-only
+    account it is the expected result, not a problem."""
+    if result.ok:
+        return _clip(result.value or "(empty)")
+    if result.unanswered:
+        return "-> no response"
+    if result.denied:
+        return f"-> refused: {_clip(_first_line(result.detail), 34)}"
+    return f"-> error: {_clip(_first_line(result.detail), 36)}"
+
+
+def _first_line(text: str) -> str:
+    return next((line.strip() for line in text.splitlines() if line.strip()), text.strip())
+
+
+def _clip(text: str, limit: int = 42) -> str:
+    # Plain dots rather than an ellipsis character: this lands on a Korean
+    # Windows console, whose code page does not reliably carry U+2026.
+    return text if len(text) <= limit else text[: limit - 3] + "..."

@@ -20,7 +20,7 @@ class TestStep(BaseModel):
 
 
 class SnmpCredentials(BaseModel):
-    """SNMPv3 USM parameters for the net-snmp client.
+    """SNMPv3 USM parameters for the SNMP client.
 
     The switch's SNMPv3 users are ordinary AOS accounts (`user <name> password
     <pw> sha256+aes ...`), so auth and privacy share that one password unless

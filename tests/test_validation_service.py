@@ -194,7 +194,10 @@ def test_port_scan_closed_passes_when_nothing_is_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "scan_top_ports",
-        lambda target, top_ports, timeout: ([], "All 200 scanned ports on 192.0.2.1 are closed"),
+        lambda target, top_ports, timeout, on_progress: (
+            [],
+            "All 200 scanned ports on 192.0.2.1 are closed",
+        ),
     )
 
     result = ValidationService().run_validation(
@@ -211,7 +214,7 @@ def test_port_scan_closed_names_the_ports_still_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "scan_top_ports",
-        lambda target, top_ports, timeout: (["22/tcp open (ssh)"], "22/tcp open ssh"),
+        lambda target, top_ports, timeout, on_progress: (["22/tcp open (ssh)"], "22/tcp open ssh"),
     )
 
     result = ValidationService().run_validation(
