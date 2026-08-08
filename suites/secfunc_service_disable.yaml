@@ -6,6 +6,6 @@ description: >-
   실행 전 configs/devices.yaml 의 serial_port 가 실제 COM 포트와 맞는지 확인할 것.
   포트스캔에 nmap이 필요하며(-sS -sU 상위 100개), raw socket 권한이 있어야 하므로
   반드시 관리자 권한 cmd에서 실행할 것.
-  cleanup 미실행 시 콘솔에서 ip service ssh/https admin-state enable 로 복구할 것.
+  cleanup 미실행 시 콘솔에서 ip service ssh admin-state enable 로 복구할 것.
 tests:
   - ../testcases/secfunc/check_ip_service_disabled_enforcement.yaml

@@ -30,7 +30,9 @@ description: >-
 
   경고: cleanup이 실행되지 않은 채(예: 프로세스 강제 종료) 끝나면 모든 원격 관리 서비스가
   꺼진 상태로 남아 네트워크로는 접속이 불가능해짐. 그 경우 콘솔에서
-  ip service ssh admin-state enable / ip service https admin-state enable 로 복구할 것.
+  ip service ssh admin-state enable 로 복구할 것. (ip service https admin-state 는 8.10에서
+  deprecated - WebView를 되살려야 하면 ip service http admin-state enable 과
+  webview force-ssl 을 쓸 것.)
 feature: system
 tags: [secfunc, mgmt, audit, required, secureadmin, console]
 severity: high
@@ -90,10 +92,16 @@ cleanup:
   # `ip service all admin-state enable`: that would also switch on telnet,
   # ftp and plain http, which the CIS suite (check_telnet_disabled.yaml,
   # check_http_disabled.yaml) requires to stay off.
+  #
+  # There is deliberately no `ip service https admin-state enable` here. On
+  # 8.10 that command is deprecated (the switch answers with an ERROR, which
+  # apply_config rightly treats as a failed command and which used to sink
+  # this testcase's cleanup) and WebView's 443 listener is derived from
+  # `ip service http admin-state` plus `webview force-ssl` -- both of which
+  # this cleanup leaves off, matching the WebView-disabled baseline.
   - action: cli
     commands:
       - ip service ssh admin-state enable
-      - ip service https admin-state enable
       - ip service snmp admin-state enable
       - ip service ntp admin-state enable
       - ip service telnet admin-state disable
