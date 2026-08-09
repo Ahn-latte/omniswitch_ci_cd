@@ -93,19 +93,24 @@ cleanup:
   # ftp and plain http, which the CIS suite (check_telnet_disabled.yaml,
   # check_http_disabled.yaml) requires to stay off.
   #
-  # There is deliberately no `ip service https admin-state enable` here. On
-  # 8.10 that command is deprecated (the switch answers with an ERROR, which
-  # apply_config rightly treats as a failed command and which used to sink
-  # this testcase's cleanup) and WebView's 443 listener is derived from
-  # `ip service http admin-state` plus `webview force-ssl` -- both of which
-  # this cleanup leaves off, matching the WebView-disabled baseline.
+  # WebView comes back on. On 8.10 `ip service https admin-state` is deprecated
+  # (the switch answers with an ERROR, which apply_config rightly treats as a
+  # failed command) -- the 443 listener is `ip service http admin-state` plus
+  # `webview force-ssl`, which is why those two are what gets restored. Leaving
+  # WebView off would strand the API/WebView half of the integrated run, which
+  # has nothing to connect to, and drift from the posture TC-CIS-003/004 assert.
   - action: cli
     commands:
       - ip service ssh admin-state enable
       - ip service snmp admin-state enable
       - ip service ntp admin-state enable
+      - ip service http admin-state enable
+      # force-ssl is a webview setting rather than a service state, so
+      # `ip service all admin-state disable` does not clear it. Re-asserting it
+      # is belt and braces, and deliberately not error-tolerant: if this ever
+      # does fail, WebView is serving plaintext on 80 and that must be loud.
+      - webview force-ssl
       - ip service telnet admin-state disable
       - ip service ftp admin-state disable
-      - ip service http admin-state disable
 continue_on_failure: false
 timeout: 600

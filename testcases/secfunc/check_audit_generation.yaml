@@ -40,6 +40,11 @@ validations:
     pattern: 'cmd: ip service \w+ admin-state (enable|disable), result: SUCCESS'
     timeout: 90
     reauth: true
-cleanup: []
+cleanup:
+  # The setup's disable/enable pair is self-cancelling only if both halves
+  # run. This makes the end state true regardless.
+  - action: cli
+    commands:
+      - ip service ntp admin-state enable
 continue_on_failure: true
 timeout: 180

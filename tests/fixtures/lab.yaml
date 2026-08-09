@@ -1,0 +1,46 @@
+# Lab config for the unit tests. Deliberately not configs/lab.yaml: that one is
+# gitignored and holds real credentials, so tests must never depend on it being
+# present or on what an operator happens to have put in it.
+switch:
+  host: 192.0.2.1
+  system_name: OS6900
+  expected_firmware: "8.10.86.R04"
+  expected_prompt: "->"
+
+console:
+  port: COM9
+  baudrate: 115200
+
+station_ip: 192.0.2.50
+test_password: "12#qweASD"
+
+accounts:
+  admin:
+    username: admin1
+    password: "not-a-real-password"
+    transport: ssh
+  secureadmin:
+    username: secureadmin
+    password: "not-a-real-password"
+    transport: serial
+  lowpriv:
+    username: user1
+    password: "not-a-real-password"
+    transport: ssh
+    provision:
+      privileges: "read-only all"
+  readonly:
+    username: readonlyy
+    password: "not-a-real-password"
+    provision:
+      privileges: "read-only vlan"
+
+baseline:
+  ip_lockout_threshold: 6
+  lockout_duration: 0
+  password_size_min: 9
+  password_history: 3
+  session_timeout: 4
+  swlog_flash_file_size: 1250
+  swlog_size_trap_threshold: 90
+  swlog_appid_level: info

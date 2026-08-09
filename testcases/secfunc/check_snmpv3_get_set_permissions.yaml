@@ -44,25 +44,25 @@ setup:
   - action: cli
     commands:
       - ip service snmp admin-state enable
-      - user snmpv3 password 12#qweASD sha256+aes read-write all allow-ssh enable
-      - user snmpv3ro password 12#qweASD sha256+aes read-only all allow-ssh enable
+      - user snmpv3 password $test_password sha256+aes read-write all allow-ssh enable
+      - user snmpv3ro password $test_password sha256+aes read-only all allow-ssh enable
 validations:
   - name: rw 계정으로 sysName.0 get
     type: snmp_get
     target: $host
     port: 161
     oid: sysName.0
-    expected: "OS6900"
+    expected: "$system_name"
     timeout: 20
     snmp:
       user: snmpv3
       level: authPriv
       auth_protocol: SHA-256
       priv_protocol: AES
-      auth_password: "12#qweASD"
+      auth_password: "$test_password"
   # sysDescr는 show system 의 Description 과 같은 문자열이라 OS 버전이 그대로 들어 있음:
   # "Alcatel-Lucent Enterprise OS6900-X48C6 8.10.86.R04 GA, December 18, 2025."
-  # 버전은 하드코딩하지 않고 devices.yaml 의 expected_firmware 를 치환해서 씀.
+  # 버전은 하드코딩하지 않고 lab.yaml 의 expected_firmware 를 치환해서 씀.
   - name: rw 계정으로 sysDescr.0 get (OS 버전 확인)
     type: snmp_get
     target: $host
@@ -75,13 +75,13 @@ validations:
       level: authPriv
       auth_protocol: SHA-256
       priv_protocol: AES
-      auth_password: "12#qweASD"
+      auth_password: "$test_password"
   - name: rw 계정으로 sysName.0 set (원래 값 자동 복구)
     type: snmp_set
     target: $host
     port: 161
     oid: sysName.0
-    value: "OS6900-SNMPTEST"
+    value: "$system_name-SNMPTEST"
     value_type: s
     timeout: 20
     snmp:
@@ -89,26 +89,26 @@ validations:
       level: authPriv
       auth_protocol: SHA-256
       priv_protocol: AES
-      auth_password: "12#qweASD"
+      auth_password: "$test_password"
   - name: ro 계정으로 sysName.0 get은 허용 (대조군)
     type: snmp_get
     target: $host
     port: 161
     oid: sysName.0
-    expected: "OS6900"
+    expected: "$system_name"
     timeout: 20
     snmp:
       user: snmpv3ro
       level: authPriv
       auth_protocol: SHA-256
       priv_protocol: AES
-      auth_password: "12#qweASD"
+      auth_password: "$test_password"
   - name: ro 계정으로 sysName.0 set은 거부
     type: snmp_denied
     target: $host
     port: 161
     oid: sysName.0
-    value: "OS6900-DENIED"
+    value: "$system_name-DENIED"
     value_type: s
     timeout: 20
     snmp:
@@ -116,11 +116,11 @@ validations:
       level: authPriv
       auth_protocol: SHA-256
       priv_protocol: AES
-      auth_password: "12#qweASD"
+      auth_password: "$test_password"
 cleanup:
   - action: cli
     commands:
-      - system name OS6900
+      - system name $system_name
       - no user snmpv3
       - no user snmpv3ro
 continue_on_failure: false

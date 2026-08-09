@@ -46,7 +46,10 @@ validations:
 cleanup:
   - action: cli
     commands:
-      - swlog output flash-file-size 1250
-      - swlog size-trap-threshold 90
+      - swlog output flash-file-size $baseline_swlog_flash_file_size
+      - swlog size-trap-threshold $baseline_swlog_size_trap_threshold
+      # The debug3 override the setup installs floods the log for every
+      # later testcase if it is left behind.
+      - swlog appid intfni subapp all level $baseline_swlog_appid_level
 continue_on_failure: false
 timeout: 180

@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from switchtest.constants import DEFAULT_DEVICES_FILE, DEFAULT_REPORT_DIR
+from switchtest.constants import DEFAULT_LAB_FILE, DEFAULT_REPORT_DIR
 from switchtest.domain.enums import DeviceSafetyState
 
 
@@ -12,7 +12,7 @@ class RuntimeContext(BaseModel):
     device_name: str
     suite_name: Optional[str] = None
     report_dir: Path = DEFAULT_REPORT_DIR
-    devices_file: Path = DEFAULT_DEVICES_FILE
+    lab_file: Path = DEFAULT_LAB_FILE
     fail_fast: bool = False
     dry_run: bool = False
     selected_tags: list[str] = Field(default_factory=list)

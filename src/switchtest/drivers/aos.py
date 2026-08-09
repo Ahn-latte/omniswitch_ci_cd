@@ -8,7 +8,7 @@ from switchtest.drivers.base import BaseSwitchDriver
 from switchtest.exceptions import BaselineRestoreError, CommandExecutionError
 from switchtest.exceptions import ConnectionError as SwitchConnectionError
 from switchtest.infrastructure.console.client import SerialConsoleTransport
-from switchtest.infrastructure.secrets import get_optional_secret, get_required_secret
+from switchtest.infrastructure.secrets import resolve_optional_secret, resolve_secret
 from switchtest.infrastructure.ssh.client import SSHTransport
 from switchtest.infrastructure.ssh.prompt import PASSWORD_PROMPT_PATTERN, is_password_prompt
 
@@ -25,8 +25,12 @@ class AOSSwitchDriver(BaseSwitchDriver):
         self.transport.connect()
 
     def _build_transport(self) -> DriverTransport:
-        password = get_required_secret(self.device.password_env)
-        secondary = get_optional_secret(self.device.enable_password_env)
+        password = resolve_secret(
+            self.device.password, self.device.password_env, f"device '{self.device.name}'"
+        )
+        secondary = resolve_optional_secret(
+            self.device.enable_password, self.device.enable_password_env
+        )
         if self.device.transport == TransportType.SERIAL:
             return SerialConsoleTransport(
                 serial_port=self.device.serial_port or "",
@@ -54,7 +58,7 @@ class AOSSwitchDriver(BaseSwitchDriver):
             self.transport.close()
 
     def enter_enable_mode(self) -> None:
-        if not self.device.enable_password_env:
+        if not self.device.enable_password and not self.device.enable_password_env:
             return
         transport = self._transport()
         result = transport.send_interactive(
@@ -80,8 +84,14 @@ class AOSSwitchDriver(BaseSwitchDriver):
             return self._run_show_with_reauth(command, timeout)
         output = self._transport().send_command(command, timeout=timeout)
         cleaned = _clean_show_output(output, command)
-        if cleaned:
+        if cleaned or not _is_repeatable(command):
             return cleaned
+        # An empty first read happens on the console, so a read is worth asking
+        # for twice. Only a read: several testcases assert on the output of a
+        # configuration command, and one that succeeds says nothing at all --
+        # re-sending it would apply it twice. `user X password P` is the case
+        # that bites, because the second attempt is refused as a reuse of the
+        # password the first attempt just set, turning a success into a failure.
         time.sleep(0.2)
         retry_output = self._transport().send_command(command, timeout=timeout)
         return _clean_show_output(retry_output, command)
@@ -168,6 +178,15 @@ class AOSSwitchDriver(BaseSwitchDriver):
                 f"{self.device.transport.value} transport is not connected"
             )
         return self.transport
+
+
+def _is_repeatable(command: str) -> bool:
+    """Whether running the command a second time is guaranteed to be harmless.
+
+    Only reads qualify. AOS has no way to say "this was a query", so this goes
+    by the verb, which is what every read in these testcases starts with.
+    """
+    return command.strip().lower().startswith("show")
 
 
 def _extract_first_line(text: str) -> str | None:

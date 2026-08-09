@@ -26,7 +26,7 @@ setup:
   # of what a previous testcase left configured (TC-IA-133 raises it to 15).
   - action: cli
     commands:
-      - aaa switch-access ip-lockout-threshold 6
+      - aaa switch-access ip-lockout-threshold $baseline_ip_lockout_threshold
   - action: ensure_unlocked
     username: admin1
   - action: trigger_failed_logins

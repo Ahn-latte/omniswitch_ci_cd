@@ -10,7 +10,13 @@ class DeviceDefinition(BaseModel):
     host: str
     port: int = 22
     username: str
-    password_env: str
+    # A password comes either straight from the (gitignored) lab config or from
+    # the environment. Both are offered because the two have different
+    # failure modes: a file is one place to edit and easy to get wrong once,
+    # an env var is easy to forget and easy to keep out of a file entirely.
+    password: Optional[str] = None
+    password_env: Optional[str] = None
+    enable_password: Optional[str] = None
     enable_password_env: Optional[str] = None
     platform: str
     # How the driver holds its own session. `host`/`port` stay meaningful for
@@ -36,6 +42,11 @@ class DeviceDefinition(BaseModel):
             raise ValueError(
                 f"device '{self.name}' uses transport 'serial' and must set 'serial_port' "
                 "(e.g. COM3 on Windows, /dev/ttyUSB0 on Linux)"
+            )
+        if not self.password and not self.password_env:
+            raise ValueError(
+                f"device '{self.name}' needs a password: set it in the lab config, or name "
+                "the environment variable holding it with 'password_env'"
             )
         return self
 

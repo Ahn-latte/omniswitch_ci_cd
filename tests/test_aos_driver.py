@@ -32,12 +32,60 @@ def _device(**overrides) -> DeviceDefinition:
         name="dev",
         host="192.168.1.1",
         username="secureadmin",
-        password_env="SWITCH_TEST_PASSWORD",
+        password="not-a-real-password",
         platform="aos",
         expected_prompt="->",
     )
     defaults.update(overrides)
     return DeviceDefinition(**defaults)
+
+
+class _RecordingSwitch:
+    """Answers `show` with content and configuration commands with silence,
+    which is how AOS actually behaves on success."""
+
+    def __init__(self, show_output: str = "Name: OS6900", empty_first_read: bool = False) -> None:
+        self.sent: list[str] = []
+        self._show_output = show_output
+        self._empty_first_read = empty_first_read
+
+    def send_command(self, command: str, timeout: int = 30) -> str:
+        self.sent.append(command)
+        if not command.startswith("show"):
+            return ""
+        if self._empty_first_read and len(self.sent) == 1:
+            return ""
+        return self._show_output
+
+
+def _driver_with(transport) -> AOSSwitchDriver:
+    driver = AOSSwitchDriver(_device())
+    driver.transport = transport
+    return driver
+
+
+def test_a_silent_configuration_command_is_not_sent_twice() -> None:
+    """Several testcases assert on a configuration command's output, and a
+    command that succeeds says nothing. Retrying on empty would run it again --
+    and a second `user X password P` is refused as a reuse of the password the
+    first one just set, turning a success into a failure (TC-IA-124)."""
+    switch = _RecordingSwitch()
+
+    output = _driver_with(switch).run_show("user admin1 password Qet135!#%")
+
+    assert switch.sent == ["user admin1 password Qet135!#%"]
+    assert output == ""
+
+
+def test_an_empty_first_read_of_a_show_is_still_retried() -> None:
+    # The serial console does return nothing on a first read; that is what the
+    # retry is for, and it has to keep working.
+    switch = _RecordingSwitch(empty_first_read=True)
+
+    output = _driver_with(switch).run_show("show system")
+
+    assert switch.sent == ["show system", "show system"]
+    assert output == "Name: OS6900"
 
 
 def test_driver_uses_ssh_transport_by_default(monkeypatch) -> None:

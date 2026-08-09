@@ -8,12 +8,18 @@ setup: []
 validations:
   - name: md5 지정 시 차단
     type: contains
-    command: user tc151 password 12#qweASD read-write all md5
+    command: user tc151 password $test_password read-write all md5
     expected: "Weak cryptographic algorithms"
   - name: 차단으로 계정 미생성 확인
     type: not_contains
     command: show user
     expected: "tc151"
-cleanup: []
+cleanup:
+  # See TC-IA-122: the account should never exist, and if it does, that is
+  # the finding -- clean it up anyway.
+  - action: cli
+    ignore_errors: true
+    commands:
+      - no user tc151
 continue_on_failure: false
 timeout: 60

@@ -1,0 +1,86 @@
+# Copy to configs/lab.yaml and fill in. lab.yaml is gitignored; this file is not,
+# so keep real passwords out of it.
+#
+#   switchtest show-config      # print every $variable testcases will substitute
+#   switchtest list-devices     # print the sessions these accounts produce
+
+switch:
+  host: 192.168.1.1
+  ssh_port: 22
+  # `system name` on the device. TC-SM-43 writes sysName over SNMP and restores this.
+  system_name: OS6900
+  expected_firmware: "8.10.86.R04"
+  expected_prompt: "->"
+
+console:
+  # The serial cable, used by every testcase that takes the switch off the
+  # network (IP ban, service disable) and by anything reading swlog.
+  port: COM4
+  baudrate: 115200
+
+# This machine's address as the switch sees it: SNMP trap receiver in TC-SM-42,
+# and the source IP the ip-ban testcases deliberately get banned.
+station_ip: 192.168.1.10
+
+# Given to every account a testcase creates. It has to satisfy the switch's own
+# password policy -- the same policy TC-IA-121/122/123 are testing.
+test_password: "12#qweASD"
+
+accounts:
+  # `transport` decides whether an account becomes a switchtest device; the key
+  # is the name you pass to `--device`. An account with `provision` is created
+  # before the run and deleted after, so it does not have to exist beforehand.
+  admin:
+    username: admin1
+    password: "CHANGE-ME"
+    # enable_password: "CHANGE-ME"
+    transport: ssh
+
+  secureadmin:
+    username: secureadmin
+    password: "CHANGE-ME"
+    # Serial, because the testcases this account runs (IP ban, service disable)
+    # cut this machine off the network; only the console survives them.
+    transport: serial
+
+  lowpriv:
+    username: user1
+    password: "CHANGE-ME"
+    transport: ssh
+    provision:
+      privileges: "read-only all"
+
+  readonly:
+    username: readonlyy
+    password: "CHANGE-ME"
+    # No transport: only the WebView browser test logs in as this account, so
+    # switchtest never opens a session for it.
+    provision:
+      privileges: "read-only vlan"
+
+# What every cleanup restores. These describe THIS switch, not AOS defaults --
+# check them against `show user lockout-setting`, `show session config` and
+# `show swlog` before the first run. A wrong value here is worse than none,
+# because cleanups will confidently write it back.
+baseline:
+  ip_lockout_threshold: 6
+  lockout_duration: 0
+  # 9, not 8: TC-IA-122 and TC-IA-123 both assert the switch refuses an 8-char
+  # password with "at least 9 characters", so 9 is what this switch runs.
+  password_size_min: 9
+  # `user password-history`. TC-IA-124 proves reuse is blocked at this value,
+  # and restores it afterwards.
+  password_history: 3
+  session_timeout: 4
+  swlog_flash_file_size: 1250
+  swlog_size_trap_threshold: 90
+  swlog_appid_level: info
+
+# Interface `tshark -D` reports, for the one testcase that captures the switch's
+# TLS ServerHello (TC-DP-713). Leave unset and that testcase errors rather than
+# passing vacuously -- which is the intended behaviour, not a bug.
+# capture_interface: "5"
+
+# The API/WebView companion repo, for the integrated run. Relative paths resolve
+# against this file's directory.
+api_poc_path: ../../omniswitch_api_poc

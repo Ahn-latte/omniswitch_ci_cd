@@ -10,6 +10,7 @@ class ValidationType(str, Enum):
     PORT_CLOSED = "port_closed"
     PORT_SCAN_CLOSED = "port_scan_closed"
     WEB_UNREACHABLE = "web_unreachable"
+    WEB_REACHABLE = "web_reachable"
     API_UNREACHABLE = "api_unreachable"
     TLS_VERSION = "tls_version"
     TCP_BLOCKED = "tcp_blocked"

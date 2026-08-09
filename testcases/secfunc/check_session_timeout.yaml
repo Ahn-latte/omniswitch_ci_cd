@@ -26,8 +26,8 @@ validations:
 cleanup:
   - action: cli
     commands:
-      - session cli timeout 4
-      - session http timeout 4
-      - session ftp timeout 4
+      - session cli timeout $baseline_session_timeout
+      - session http timeout $baseline_session_timeout
+      - session ftp timeout $baseline_session_timeout
 continue_on_failure: false
 timeout: 60

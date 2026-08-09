@@ -28,6 +28,6 @@ validations:
 cleanup:
   - action: cli
     commands:
-      - aaa switch-access ip-lockout-threshold 6
+      - aaa switch-access ip-lockout-threshold $baseline_ip_lockout_threshold
 continue_on_failure: false
 timeout: 60

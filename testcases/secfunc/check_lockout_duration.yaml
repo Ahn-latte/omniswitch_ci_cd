@@ -13,6 +13,11 @@ validations:
     type: regex
     command: show user lockout-setting
     pattern: 'Duration:\s*5\s*\(minutes\)'
-cleanup: []
+cleanup:
+  # Without this the switch keeps the 5-minute duration this testcase set,
+  # which is the value under test, not the value the lab runs with.
+  - action: cli
+    commands:
+      - user lockout-duration $baseline_lockout_duration
 continue_on_failure: false
 timeout: 60

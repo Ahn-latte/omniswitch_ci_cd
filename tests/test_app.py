@@ -9,7 +9,7 @@ def test_run_application_invalid_input_returns_invalid_input_code() -> None:
         RunArguments(
             device_name="missing",
             suite_path=Path("suites/smoke.yaml"),
-            devices_file=Path("configs/devices.yaml"),
+            lab_file=Path("tests/fixtures/lab.yaml"),
             report_dir=Path("reports"),
             dry_run=True,
         )
@@ -20,9 +20,9 @@ def test_run_application_invalid_input_returns_invalid_input_code() -> None:
 def test_run_application_dry_run_returns_success() -> None:
     exit_code = run_application(
         RunArguments(
-            device_name="ACSSW01",
+            device_name="admin",
             suite_path=Path("suites/smoke.yaml"),
-            devices_file=Path("configs/devices.yaml"),
+            lab_file=Path("tests/fixtures/lab.yaml"),
             report_dir=Path("reports"),
             dry_run=True,
         )

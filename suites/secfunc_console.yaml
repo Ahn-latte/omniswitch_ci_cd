@@ -1,0 +1,32 @@
+name: secfunc_console
+description: >-
+  시리얼 콘솔(secureadmin)로만 돌릴 수 있는 secfunc 항목. 반드시
+  --device secureadmin 으로 실행:
+
+    switchtest run --device secureadmin --suite suites/secfunc_console.yaml
+
+  이 다섯 개가 콘솔을 요구하는 이유는 제각기 다르지만 결론은 같음 - 시험 도중
+  이 PC가 네트워크로는 스위치에 닿을 수 없게 됨. swlog 열람 권한이 secureadmin
+  전용인 것도 겹침. lab.yaml 의 console.port 가 실제 COM 포트와 맞아야 함.
+
+  순서가 중요함. 파괴적인 것을 뒤로 보냈으므로 바꾸지 말 것:
+    1. TC-IA-124    비밀번호 이력 - admin 비밀번호를 바꿨다가 되돌림(전역 password-history 조작)
+    2. TC-SM-42/43  SNMPv3 계정·스테이션 생성과 get/set 권한 - 네트워크 정상 필요
+       (SNMP 요청은 UDP/161로 나감)
+    3. TC-IA-133    계정 잠금 - admin 계정을 잠갔다가 푼다
+    4. TC-SM-41B    모든 IP 서비스 차단 - SSH/API/WebView가 전부 죽었다 살아남
+    5. TC-IA-134    IP 차단 - 이 PC의 IP가 차단됨. 마지막이어야 함
+
+  경고: cleanup 없이 중단되면(프로세스 강제 종료 등) 스위치가 이 PC를 차단하거나
+  서비스가 꺼진 채로 남음. 콘솔에서 복구할 것:
+    aaa switch-access banned-ip all release
+    ip service ssh admin-state enable
+  TC-IA-124 가 중단되면 admin 비밀번호가 Qet135!#% 로, password-history 가 0으로 남을 수
+  있음. 콘솔에서: user admin1 password 12#qweASD / user password-history 3
+tests:
+  - ../testcases/secfunc/check_password_history_enforcement.yaml
+  - ../testcases/secfunc/check_snmpv3_account_station.yaml
+  - ../testcases/secfunc/check_snmpv3_get_set_permissions.yaml
+  - ../testcases/secfunc/check_lockout_enforcement_ssh.yaml
+  - ../testcases/secfunc/check_ip_service_disabled_enforcement.yaml
+  - ../testcases/secfunc/check_ip_ban_enforcement_ssh.yaml

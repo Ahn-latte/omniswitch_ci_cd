@@ -12,7 +12,7 @@ from switchtest.exceptions import (
     SwitchTestError,
 )
 from switchtest.exitcodes import ExitCode
-from switchtest.infrastructure.loaders.devices import load_device_by_name
+from switchtest.infrastructure.loaders.lab import load_lab
 from switchtest.infrastructure.loaders.suites import load_suite_testcases
 from switchtest.orchestrator import Orchestrator
 from switchtest.utils.time import make_run_id
@@ -22,7 +22,7 @@ from switchtest.utils.time import make_run_id
 class RunArguments:
     device_name: str
     suite_path: Path
-    devices_file: Path
+    lab_file: Path
     report_dir: Path
     json_report: Path | None = None
     junit_report: Path | None = None
@@ -33,21 +33,21 @@ class RunArguments:
 
 def run_application(args: RunArguments) -> int:
     try:
-        device = load_device_by_name(args.devices_file, args.device_name)
-        variables = {"host": device.host}
-        # Only substitute a version the device entry actually declares. Passing
-        # "" instead would turn `pattern: "$expected_firmware"` into an empty
-        # pattern, which matches anything -- a firmware check that silently
-        # passes. Leaving the placeholder unsubstituted makes it fail visibly.
-        if device.expected_firmware:
-            variables["expected_firmware"] = device.expected_firmware
-        suite, tests = load_suite_testcases(args.suite_path, variables=variables)
+        lab = load_lab(args.lab_file)
+        devices = lab.devices()
+        if args.device_name not in devices:
+            raise LoaderError(
+                f"Unknown device '{args.device_name}' in {args.lab_file}. Devices come from "
+                f"the accounts that declare a transport: {', '.join(sorted(devices)) or '(none)'}"
+            )
+        device = devices[args.device_name]
+        suite, tests = load_suite_testcases(args.suite_path, variables=lab.variables())
         context = RuntimeContext(
             run_id=make_run_id(),
             device_name=device.name,
             suite_name=suite.name,
             report_dir=args.report_dir,
-            devices_file=args.devices_file,
+            lab_file=args.lab_file,
             fail_fast=args.fail_fast,
             dry_run=args.dry_run,
             selected_tags=args.tags,

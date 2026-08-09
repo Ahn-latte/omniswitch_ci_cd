@@ -39,6 +39,7 @@ class ValidationService:
             ValidationType.PORT_CLOSED: self._validate_port_closed,
             ValidationType.PORT_SCAN_CLOSED: self._validate_port_scan_closed,
             ValidationType.WEB_UNREACHABLE: self._validate_web_unreachable,
+            ValidationType.WEB_REACHABLE: self._validate_web_reachable,
             ValidationType.API_UNREACHABLE: self._validate_api_unreachable,
             ValidationType.TLS_VERSION: self._validate_tls_version,
             ValidationType.TCP_BLOCKED: self._validate_tcp_blocked,
@@ -169,6 +170,24 @@ class ValidationService:
             message=None
             if unreachable
             else f"Web service on {validation.target}:{validation.port} is still reachable",
+        )
+
+    def _validate_web_reachable(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
+        """The positive form of `web_unreachable`, for asserting that WebView is
+        actually serving. Needed because "the service is configured" and "a
+        browser can load it" are different claims, and only the second one tells
+        you the API/WebView tests have something to talk to."""
+        unreachable, output = check_web_unreachable(
+            validation.target or "", validation.port or 0, timeout=validation.timeout
+        )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.FAIL if unreachable else ResultStatus.PASS,
+            observed=output,
+            expected=f"http(s) on port {validation.port} reachable",
+            message=None
+            if not unreachable
+            else f"Web service on {validation.target}:{validation.port} did not load",
         )
 
     def _validate_api_unreachable(

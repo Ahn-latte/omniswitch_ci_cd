@@ -1,0 +1,22 @@
+id: TC-CIS-004B
+name: Verify HTTPS WebView is reachable in a browser
+description: >-
+  Browser-level counterpart to TC-CIS-004: WebView must actually serve on 443,
+  not merely be reported as configured. This asserts the opposite of what it
+  used to -- it previously required 443 to be dead, which contradicted
+  TC-CIS-003/004 (both expect `http 80 enabled` with Force-SSL on, i.e. a live
+  443) and would have failed against any switch the API/WebView tests can run
+  against at all. TC-CIS-003B still checks that plain HTTP on 80 stays dead,
+  which is what Force-SSL buys.
+feature: system
+tags: [cis, system, security, management, network, web]
+severity: high
+setup: []
+validations:
+  - name: HTTPS WebView on port 443 loads
+    type: web_reachable
+    target: $host
+    port: 443
+cleanup: []
+continue_on_failure: false
+timeout: 60

@@ -31,17 +31,17 @@ setup:
   - action: cli
     ignore_errors: true
     commands:
-      - no snmp station 192.168.1.10
+      - no snmp station $station_ip
       - no user snmpv3
   - action: cli
     commands:
-      - user snmpv3 password 12#qweASD sha256+aes read-write all allow-ssh enable
-      - snmp station 192.168.1.10 161 snmpv3 v3 enable
+      - user snmpv3 password $test_password sha256+aes read-write all allow-ssh enable
+      - snmp station $station_ip 161 snmpv3 v3 enable
 validations:
   - name: 감사로그에 스테이션 생성 성공 기록
     type: regex
     command: show log swlog | grep -i station
-    pattern: 'cmd: snmp station 192\.168\.1\.10 161 snmpv3 v3 enable, result: SUCCESS'
+    pattern: 'cmd: snmp station \S+ 161 snmpv3 v3 enable, result: SUCCESS'
     timeout: 90
     reauth: true
   - name: 감사로그에 SNMPv3 계정 생성 성공 기록
@@ -53,7 +53,7 @@ validations:
   - name: 스테이션이 설정에 반영됨 (show snmp station)
     type: contains
     command: show snmp station
-    expected: "192.168.1.10"
+    expected: "$station_ip"
   - name: SNMPv3 계정이 생성됨 (show user snmpv3)
     type: contains
     command: show user snmpv3
@@ -61,7 +61,7 @@ validations:
 cleanup:
   - action: cli
     commands:
-      - no snmp station 192.168.1.10
+      - no snmp station $station_ip
       - no user snmpv3
 continue_on_failure: false
 timeout: 300

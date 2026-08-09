@@ -18,5 +18,7 @@ cleanup:
   - action: cli
     commands:
       - no vlan 10 members port 1/1/15
+      # The VLAN itself was created by the setup and has to go too.
+      - no vlan 10
 continue_on_failure: false
 timeout: 60
