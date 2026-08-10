@@ -168,11 +168,12 @@ Order matters here; each entry cuts this machine off the switch a little more.
 | `TC-SM-41B` | Disabling every IP service actually blocks all network management |
 | `TC-IA-134` | SSH IP ban actually triggers at the IP lockout threshold |
 
-> **`TC-IA-124` changes the `admin` account's real password** to a new value and
-> restores it, and it assumes the account's current password equals
-> `$test_password`. It runs over the console so that even a failed restore can
-> be fixed out-of-band. If your `admin` password differs, exclude it
-> (`--phase` without `switch-console`, or `--tag`) or align the value.
+> **`TC-IA-124` assumes the `admin` account's current password equals
+> `$test_password`**, since the reuse case attempts a change to that same
+> value. It never actually changes the password — rejection is the pass
+> condition — so there is nothing to restore. If your `admin` password
+> differs, exclude it (`--phase` without `switch-console`, or `--tag`) or
+> align the value.
 
 ### API and WebView transports (in `omniswitch_api_poc`)
 
@@ -202,6 +203,227 @@ Two rules the existing testcases follow:
 - **Whatever the setup changes, the cleanup restores** — to a `$baseline_*`
   value, not a literal. Accounts a testcase needs are created by that testcase
   and deleted by it.
+
+```cmd
+venv\Scripts\switchtest validate-testcase testcases\secfunc\check_ip_service.yaml
+venv\Scripts\switchtest validate-suite suites\secfunc_all_ssh.yaml
+venv\Scripts\python.exe -m pytest
+```
+
+---
+
+## 한국어 (Korean)
+
+# switchtest
+
+Alcatel-Lucent Enterprise OmniSwitch AOS8용 보안 기능(security-functional) 테스트
+자동화 도구입니다. 테스트케이스는 YAML로 작성하고, 결과는 JSON과 JUnit XML로
+출력됩니다.
+
+동반 저장소인 [`omniswitch_api_poc`](../omniswitch_api_poc)(동일한 점검을
+HTTPS/WebView API와 실제 브라우저로 수행)와 함께 쓰면, 명령 하나로 스위치
+한 대에 대한 모든 보안 기능 점검을 실행할 수 있습니다:
+
+```cmd
+venv\Scripts\python.exe scripts\run_secfunc.py
+```
+
+### 설치
+
+```cmd
+python -m venv venv
+venv\Scripts\python.exe -m pip install -e .[dev,web]
+venv\Scripts\python.exe -m playwright install chromium
+```
+
+`[web]`과 Chromium 다운로드는 브라우저 레벨 점검에 필요합니다. 포트 스캔
+점검을 위해서는 `nmap`이 `PATH`에 있어야 합니다. 그 외에는 별도로 필요한
+것이 없습니다 — SNMPv3는 pysnmp를 통해 동작하며, 이는 `pip install` 시
+함께 설치됩니다.
+
+### 설정
+
+파일 하나에 모든 것이 들어 있습니다: 스위치 주소, 계정, 그리고 정리
+(cleanup) 시 스위치를 되돌릴 설정 값들입니다.
+
+```cmd
+copy configs\lab.example.yaml configs\lab.yaml
+```
+
+파일을 수정한 뒤, 테스트케이스가 실제로 무엇을 보게 될지 확인하세요:
+
+```cmd
+venv\Scripts\switchtest show-config     # 모든 $변수, 해석된 값
+venv\Scripts\switchtest list-devices    # 이 계정들로 생성되는 세션 목록
+```
+
+`configs/lab.yaml`은 gitignore 대상입니다. `provision:`으로 표시된 계정은
+실행 전에 생성되고 실행 후 삭제되므로, 미리 존재할 필요가 없습니다.
+
+> `baseline:` 블록은 AOS 기본값이 아니라 **현재 이 스위치**의 상태를
+> 기술합니다. 정리(cleanup) 단계에서 이 값들을 그대로 되돌려 쓰므로, 잘못된
+> 값은 아예 실행하지 않는 것보다 더 나쁩니다. `show user lockout-setting`,
+> `show session config`, `show swlog`로 먼저 값을 확인하세요.
+
+일부 점검은 하드웨어가 필요합니다:
+
+| 필요한 것 | 사용하는 곳 |
+|---|---|
+| 시리얼 콘솔 케이블 (`console.port`) | `secfunc_console.yaml`의 모든 항목, API 저장소의 IP-ban 테스트 |
+| `nmap`이 `PATH`에 있고 **관리자 권한** 셸 | TC-SM-41B의 포트 스캔 (`-sS`/`-sU`는 raw socket 필요) |
+| `tshark` + `capture_interface` 설정 | TC-DP-713 (TLS 핸드셰이크 캡처) |
+
+### 실행
+
+두 저장소 전체를, 올바른 순서로:
+
+```cmd
+venv\Scripts\python.exe scripts\run_secfunc.py
+venv\Scripts\python.exe scripts\run_secfunc.py --list          # 실행 계획 보기
+venv\Scripts\python.exe scripts\run_secfunc.py --skip-console  # 콘솔 케이블 미연결 시
+venv\Scripts\python.exe scripts\run_secfunc.py --phase switch-ssh
+```
+
+또는 스위트를 하나씩:
+
+```cmd
+venv\Scripts\switchtest run --device admin       --suite suites\secfunc_all_ssh.yaml
+venv\Scripts\switchtest run --device lowpriv     --suite suites\secfunc_lowpriv.yaml
+venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_console.yaml
+```
+
+`--json reports\out.json`, `--junit reports\out.xml`, `--fail-fast`,
+`--dry-run`(YAML만 검증하고 아무것도 건드리지 않음) 옵션을 추가할 수
+있습니다.
+
+#### 왜 이 순서로 실행하는가
+
+이 러너는 두 도구를 단순히 순서대로 호출하는 것이 아닙니다. 세 가지
+제약이 순서를 결정하며, 이를 어기면 스위치와 무관한 실패가 발생합니다:
+
+1. **일부 점검은 의도적으로 스위치를 망가뜨립니다.** TC-SM-41B는 모든 IP
+   서비스를 끄고, TC-IA-134는 이 머신의 IP를 차단합니다. 네트워크로만
+   접근 가능한 항목은 반드시 먼저 끝나야 합니다.
+2. **시리얼 케이블은 하나뿐입니다.** 두 저장소 모두 이를 사용하려 하므로,
+   해당 단계들은 절대 겹치지 않습니다 — 이 때문에 어떤 것도 병렬로
+   실행되지 않습니다.
+3. **계정은 스스로를 생성할 수 없습니다.** 저권한 점검은 러너가 사전에
+   프로비저닝하고 이후(크래시가 나더라도) 제거하는 계정으로 로그인합니다.
+
+| # | 단계 | 세션 | 하는 일 |
+|---|---|---|---|
+| 1 | `password-change` | 콘솔 → SSH → API → 브라우저 | 동일한 비밀번호 변경 정책을 네 가지 전송 방식 모두에서, 하나씩 순서대로 확인 |
+| 2 | `switch-ssh` | SSH, `admin` | 25개 테스트케이스; 파괴적이지 않음 |
+| 3 | `switch-lowpriv` | SSH, `lowpriv` | 감사(audit) 접근 제한 확인 |
+| 4 | `api-network` | HTTPS + 브라우저 | WebView가 떠 있어야 하므로 6단계보다 먼저 실행 |
+| 5 | `api-console` | HTTPS + 콘솔 | 이 호스트의 IP를 차단하고, 콘솔을 통해 해제 |
+| 6 | `switch-console` | 시리얼, `secureadmin` | 비밀번호 이력, SNMP, 잠금, 서비스 비활성화, IP 차단 — 이 순서대로 |
+
+1단계는 동일한 정책 점검을 콘솔, SSH, API, 브라우저 순서로 함께가 아니라
+하나씩 실행합니다: 네 가지 모두 하나의 계정 비밀번호를 변경하려 하므로,
+동시에 실행하면 충돌합니다. 시도하는 모든 비밀번호는 애초에 유효하지
+않으므로 실제로 아무것도 바뀌지 않습니다. 진행 상황은 전송 방식별로
+표시됩니다.
+
+> **실행이 단계 도중 중단되면**, 스위치가 이 머신을 계속 차단 중이거나
+> 서비스가 꺼진 상태로 남을 수 있습니다. 콘솔에서 복구하세요:
+> `aaa switch-access banned-ip all release` 및
+> `ip service ssh admin-state enable`
+
+### 테스트케이스
+
+#### `suites/password_change_policy.yaml` — 네 가지 전송 방식 모두 (테스트케이스 1개 × 4)
+
+`TC-IA-123`(비밀번호 변경 정책: 유효하지 않은 비밀번호는 모두 거부되어야
+함)을 콘솔, SSH 순으로 실행한 뒤 — API 저장소에서 — API와 브라우저로
+실행합니다. 통합 실행의 1단계입니다.
+
+#### `suites/secfunc_all_ssh.yaml` — SSH, `admin` (25개)
+
+| ID | 이름 |
+|---|---|
+| `TC-IA-121` | 안전한 비밀번호 정책 적용 |
+| `TC-IA-122` | 신규 계정 생성 시 비밀번호 정책 적용 |
+| `TC-IA-131` | 인증 실패 잠금 임계값 |
+| `TC-IA-132` | 설정 가능한 잠금 지속시간 |
+| `TC-IA-151` | 비밀번호 저장 시 취약한 암호 알고리즘 거부 |
+| `TC-FC-311` | IP 기반 ACL 정책 설정 |
+| `TC-FC-312` | IEEE 802.1Q VLAN 태깅 |
+| `TC-SM-41` | 원격 서비스 활성화/비활성화 |
+| `TC-SM-441` | 펌웨어 버전 표시 |
+| `TC-SM-442` | 펌웨어 해시 검증 |
+| `TC-SM-461` | 세션 비활성 타임아웃 |
+| `TC-ST-511` | 부팅 시 하드웨어 자체 테스트 |
+| `TC-ST-512` | 부팅 시 프로세스 자체 테스트 |
+| `TC-ST-513` | 요청 시 하드웨어/프로세스 자체 테스트 |
+| `TC-ST-521` | 부팅 시 펌웨어 이미지 무결성 검사 |
+| `TC-ST-523` | 백업/복원 시 설정 파일 무결성 검사 |
+| `TC-DP-711` | 원격 접속 암호화 채널 |
+| `TC-DP-712` | TLS 기반 Syslog |
+| `TC-DP-713` | WebView TLS 핸드셰이크가 TLS 1.2로 협상됨 — `capture_interface` 필요 |
+| `TC-DP-716` | TLS 1.2 이상 |
+| `TC-DP-717` | SSH v2 지원 |
+| `TC-AU-811` | 감사 데이터 생성 |
+| `TC-AU-821` | 감사 데이터 필수 필드 |
+| `TC-AU-831` | 임계값 초과 시 감사 기록 덮어쓰기 |
+| `TC-AU-842` | 외부 로그 서버로 감사 데이터 내보내기 |
+
+#### `suites/secfunc_lowpriv.yaml` — SSH, `lowpriv` (1개)
+
+| ID | 이름 |
+|---|---|
+| `TC-AU-841` | 감사 데이터 접근 제한(저권한 계정) |
+
+#### `suites/secfunc_console.yaml` — 시리얼 콘솔, `secureadmin` (6개)
+
+여기서는 순서가 중요합니다. 항목이 하나씩 실행될 때마다 이 머신은 스위치와
+조금씩 더 단절됩니다.
+
+| ID | 이름 |
+|---|---|
+| `TC-IA-124` | 비밀번호 이력이 최근 비밀번호 재사용을 방지 |
+| `TC-SM-42` | SNMPv3 계정과 트랩 스테이션 생성 및 감사 |
+| `TC-SM-43` | SNMPv3 get/set이 읽기/쓰기 계정에서는 동작, 읽기 전용 계정에서는 거부 |
+| `TC-IA-133` | SSH 잠금이 3회 실패 후 실제로 발동 |
+| `TC-SM-41B` | 모든 IP 서비스 비활성화 시 실제로 모든 네트워크 관리 차단 |
+| `TC-IA-134` | SSH IP 차단이 IP 잠금 임계값에서 실제로 발동 |
+
+> **`TC-IA-124`는 `admin` 계정의 현재 비밀번호가 `$test_password`와 같다고
+> 가정합니다** — 재사용 케이스가 그 값으로 변경을 시도하기 때문입니다.
+> 실제로는 비밀번호를 바꾸지 않습니다 — 거부되는 것이 곧 성공 조건이라
+> 복원할 것 자체가 없습니다. `admin` 비밀번호가 다르다면 이 항목을
+> 제외하거나(`--phase`에서 `switch-console` 제외, 또는 `--tag` 사용) 값을
+> 맞추세요.
+
+#### API 및 WebView 전송 방식 (`omniswitch_api_poc`)
+
+HTTPS API와 실제 브라우저를 통한 동일한 동작 검증 — 비밀번호 정책, 계정
+잠금, IP 차단, 메뉴 표시. 해당 저장소의 README를 참고하세요. 위의
+`password-change`, `api-network`, `api-console` 단계에서 실행됩니다.
+
+#### 기타 스위트
+
+`suites/cis_smoke.yaml`(CIS 정렬 관리 강화), 그리고 `suites/smoke.yaml`과
+번호가 매겨진 `suite1/3/4/5/7/8.yaml` 그룹들 — 동일한 secfunc
+테스트케이스를 요구사항 섹션별로 나눈 것입니다.
+
+### 테스트케이스 작성
+
+테스트케이스는 `setup` → `validations` → `cleanup` 구조입니다. 검증 타입:
+`contains`, `not_contains`, `regex`, `equals`, `ping`, `port_closed`,
+`port_scan_closed`, `web_unreachable`, `web_reachable`, `api_unreachable`,
+`tls_version`, `tcp_blocked`, `snmp_get`, `snmp_set`, `snmp_denied`.
+
+기존 테스트케이스가 따르는 두 가지 규칙:
+
+- **랩 환경의 값을 하드코딩하지 않습니다.** `$host`, `$station_ip`,
+  `$system_name`, `$test_password`, `$<role>_user`, `$baseline_*`를
+  사용하세요 — `switchtest show-config`가 전체 목록을 보여줍니다. 여덟 개
+  테스트케이스에 독립적으로 박아 넣은 숫자는 언젠가 서로 어긋나게 되는
+  숫자입니다.
+- **setup이 바꾼 것은 cleanup이 반드시 복원합니다** — 리터럴 값이 아니라
+  `$baseline_*` 값으로. 테스트케이스가 필요로 하는 계정은 그
+  테스트케이스가 생성하고 삭제합니다.
 
 ```cmd
 venv\Scripts\switchtest validate-testcase testcases\secfunc\check_ip_service.yaml

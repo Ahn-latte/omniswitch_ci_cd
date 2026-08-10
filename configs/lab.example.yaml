@@ -1,35 +1,35 @@
-# Copy to configs/lab.yaml and fill in. lab.yaml is gitignored; this file is not,
-# so keep real passwords out of it.
+# configs/lab.yaml 로 복사한 뒤 값을 채우세요. lab.yaml은 gitignore 대상이지만
+# 이 파일(lab.example.yaml)은 아니므로, 여기에는 실제 비밀번호를 적지 마세요.
 #
-#   switchtest show-config      # print every $variable testcases will substitute
-#   switchtest list-devices     # print the sessions these accounts produce
+#   switchtest show-config      # 테스트케이스가 치환할 모든 $변수를 출력
+#   switchtest list-devices     # 이 계정들로 생성되는 세션 목록을 출력
 
 switch:
   host: 192.168.1.1
   ssh_port: 22
-  # `system name` on the device. TC-SM-43 writes sysName over SNMP and restores this.
+  # 장비의 `system name`. TC-SM-43이 SNMP로 sysName을 썼다가 이 값으로 복원함.
   system_name: OS6900
   expected_firmware: "8.10.86.R04"
   expected_prompt: "->"
 
 console:
-  # The serial cable, used by every testcase that takes the switch off the
-  # network (IP ban, service disable) and by anything reading swlog.
+  # 시리얼 콘솔 케이블. 스위치를 네트워크에서 끊어버리는 모든 테스트케이스
+  # (IP 차단, 서비스 비활성화)와 swlog를 읽는 모든 항목이 이걸 사용함.
   port: COM4
   baudrate: 115200
 
-# This machine's address as the switch sees it: SNMP trap receiver in TC-SM-42,
-# and the source IP the ip-ban testcases deliberately get banned.
+# 스위치 입장에서 본 이 머신(테스트 실행 PC)의 주소: TC-SM-42의 SNMP 트랩 수신지이자,
+# ip-ban 테스트케이스들이 의도적으로 차단시키는 소스 IP.
 station_ip: 192.168.1.10
 
-# Given to every account a testcase creates. It has to satisfy the switch's own
-# password policy -- the same policy TC-IA-121/122/123 are testing.
+# 테스트케이스가 생성하는 모든 계정에 부여되는 값. 스위치 자체의 비밀번호 정책을
+# 만족해야 함 -- TC-IA-121/122/123이 검증하는 바로 그 정책.
 test_password: "12#qweASD"
 
 accounts:
-  # `transport` decides whether an account becomes a switchtest device; the key
-  # is the name you pass to `--device`. An account with `provision` is created
-  # before the run and deleted after, so it does not have to exist beforehand.
+  # `transport`가 이 계정이 switchtest 디바이스가 될지를 결정함; 그 키 이름이
+  # `--device`에 넘기는 이름이 됨. `provision`이 있는 계정은 실행 전에 생성되고
+  # 실행 후 삭제되므로, 미리 존재할 필요가 없음.
   admin:
     username: admin1
     password: "CHANGE-ME"
@@ -39,8 +39,8 @@ accounts:
   secureadmin:
     username: secureadmin
     password: "CHANGE-ME"
-    # Serial, because the testcases this account runs (IP ban, service disable)
-    # cut this machine off the network; only the console survives them.
+    # 시리얼: 이 계정이 실행하는 테스트케이스(IP 차단, 서비스 비활성화)가 이
+    # 머신을 네트워크에서 끊어버리므로, 콘솔만이 그 상황에서 살아남음.
     transport: serial
 
   lowpriv:
@@ -53,34 +53,35 @@ accounts:
   readonly:
     username: readonlyy
     password: "CHANGE-ME"
-    # No transport: only the WebView browser test logs in as this account, so
-    # switchtest never opens a session for it.
+    # transport 없음: WebView 브라우저 테스트만 이 계정으로 로그인하므로,
+    # switchtest는 이 계정용 세션을 열지 않음.
     provision:
       privileges: "read-only vlan"
 
-# What every cleanup restores. These describe THIS switch, not AOS defaults --
-# check them against `show user lockout-setting`, `show session config` and
-# `show swlog` before the first run. A wrong value here is worse than none,
-# because cleanups will confidently write it back.
+# 모든 cleanup이 되돌리는 목표값. AOS 기본값이 아니라 "이 스위치"의 현재 상태를
+# 기술하는 것이므로, 최초 실행 전에 `show user lockout-setting`,
+# `show session config`, `show swlog`로 실제 값을 확인하세요. 값이 틀리면
+# 아무 값도 없는 것보다 더 나쁩니다 -- cleanup이 그 값을 확신을 갖고 그대로
+# 써버리기 때문입니다.
 baseline:
   ip_lockout_threshold: 6
   lockout_duration: 0
-  # 9, not 8: TC-IA-122 and TC-IA-123 both assert the switch refuses an 8-char
-  # password with "at least 9 characters", so 9 is what this switch runs.
+  # 8이 아니라 9: TC-IA-122와 TC-IA-123 둘 다 8자리 비밀번호가 "at least 9
+  # characters" 로 거부될 것을 기대하므로, 이 스위치는 9로 설정되어 있어야 함.
   password_size_min: 9
-  # `user password-history`. TC-IA-124 proves reuse is blocked at this value,
-  # and restores it afterwards.
+  # `user password-history`. TC-IA-124가 이 값에서 재사용이 실제로 차단되는지
+  # 증명함(값 자체를 바꾸지 않으므로 복원할 것은 없음).
   password_history: 3
   session_timeout: 4
   swlog_flash_file_size: 1250
   swlog_size_trap_threshold: 90
   swlog_appid_level: info
 
-# Interface `tshark -D` reports, for the one testcase that captures the switch's
-# TLS ServerHello (TC-DP-713). Leave unset and that testcase errors rather than
-# passing vacuously -- which is the intended behaviour, not a bug.
+# `tshark -D`가 보고하는 인터페이스 이름/번호. 스위치의 TLS ServerHello를
+# 캡처하는 유일한 테스트케이스(TC-DP-713)에 쓰임. 비워두면 그 테스트케이스는
+# 무의미하게 통과하는 대신 에러를 내는데, 이는 버그가 아니라 의도된 동작임.
 # capture_interface: "5"
 
-# The API/WebView companion repo, for the integrated run. Relative paths resolve
-# against this file's directory.
+# 통합 실행을 위한 API/WebView 동반 저장소 경로. 상대 경로는 이 파일이 있는
+# 디렉터리를 기준으로 해석됨.
 api_poc_path: ../../omniswitch_api_poc

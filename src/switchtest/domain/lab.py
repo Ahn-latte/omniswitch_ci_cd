@@ -75,8 +75,8 @@ class LabBaseline(BaseModel):
     lockout_duration: int = 0
     password_size_min: int = 9
     # `user password-history`: how many recent passwords the switch refuses to
-    # reuse. TC-IA-124 restores this after temporarily setting it to 0 so it can
-    # put a test account's original password back.
+    # reuse. TC-IA-124 pins this to the baseline before asserting reuse is
+    # refused; it never changes the value, so there is nothing to restore.
     password_history: int = 3
     session_timeout: int = 4
     swlog_flash_file_size: int = 1250
