@@ -88,6 +88,43 @@ setup:
       - ip service ntp admin-state disable
       - ip service ntp admin-state disable
       - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
 validations:
   - name: 임계치 반영 (최저 한도 50%)
     type: regex
