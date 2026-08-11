@@ -387,24 +387,39 @@ def stage_services_and_accounts(transport: SerialConsoleTransport, lab: LabConfi
     would just be something for that run to delete.
     """
     stage = Stage("인증 설정, 서비스 활성화, 고정 계정 생성")
-    commands = [
-        "aaa authentication default local",
-        "ip service ssh admin-state enable",
+    # (command, tolerate_errors). Everything here is written to be safe to run
+    # twice: this is the stage most likely to be re-run with --from-stage after
+    # a later one fails, and creating an account that already exists is an
+    # error on AOS, which would abort the resume.
+    commands: list[tuple[str, bool]] = [
+        ("aaa authentication default local", False),
+        # `default` is not enough for WebView. AOS authorises switch access per
+        # service, and with HTTP left unconfigured every API/WebView login is
+        # refused with "Authentication failure : No switch access allowed for
+        # HTTP" -- a 401 that looks like a wrong password but is not: the
+        # account is fine, the service just has no authentication server. SSH
+        # works off `default`, which is why only this one bites.
+        ("aaa authentication http local", False),
+        ("ip service ssh admin-state enable", False),
         # Enabled as `http`, reported by `show ip service` as `https` -- see the
         # check below. `ip service https admin-state` is deprecated on 8.10 and
         # answers with an ERROR, so this is the spelling that works.
-        "ip service http admin-state enable",
+        ("ip service http admin-state enable", False),
     ]
     for role, account in lab.accounts.items():
         if account.provision or account.username == lab.commissioning.factory_username:
             continue
         privileges = "read-write all"
-        commands.append(f"user {account.username} password {account.password} {privileges}")
+        # Delete first, tolerating the error when there is nothing to delete:
+        # `user <name> ...` fails outright if the account exists, so without
+        # this a re-run of this stage stops here.
+        commands.append((f"no user {account.username}", True))
+        commands.append((f"user {account.username} password {account.password} {privileges}", False))
 
-    for command in commands:
+    for command, tolerate_errors in commands:
         output = transport.send_command(command, timeout=30)
         stage.commands.append(_redact(command))
-        if "error" in output.lower():
+        if "error" in output.lower() and not tolerate_errors:
             stage.error = f"'{_redact(command)}' was rejected: {output.strip()}"
             return stage
 
@@ -435,7 +450,39 @@ def stage_services_and_accounts(transport: SerialConsoleTransport, lab: LabConfi
                 expected=f"{service} enabled",
             )
         )
+
+    # Checked here rather than left to the next run: with HTTP unauthorised the
+    # switch answers every API and WebView login with a 401 that reads like a
+    # wrong password, and the whole api-network/api-console half of
+    # run_secfunc.py fails for a reason that has nothing to do with what it
+    # was testing.
+    authentication = transport.send_command("show aaa authentication", timeout=30)
+    stage.checks.append(
+        Check(
+            name="HTTP(WebView/API) 인증 경로 설정",
+            passed=_aaa_service_configured(authentication, "http"),
+            observed=_condense(authentication, lines=10),
+            expected="Service type = Http -> local",
+        )
+    )
     return stage
+
+
+def _aaa_service_configured(output: str, service: str) -> bool:
+    """True when `show aaa authentication` lists an authentication server for
+    this service. The output is sectioned as "Service type = Http" followed by
+    the servers for it, so the check reads the lines under the heading rather
+    than looking for the word anywhere."""
+    lines = [line.strip() for line in output.split("\n")]
+    for index, line in enumerate(lines):
+        if not re.match(rf"(?i)service type\s*=\s*{re.escape(service)}\b", line):
+            continue
+        for following in lines[index + 1 :]:
+            if re.match(r"(?i)service type\s*=", following):
+                break
+            if following and "server" in following.lower():
+                return "local" in following.lower()
+    return False
 
 
 def stage_save(transport: SerialConsoleTransport) -> Stage:
