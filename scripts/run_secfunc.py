@@ -92,7 +92,7 @@ PHASES: list[Phase] = [
         "switch-ssh",
         "Switch checks over SSH (admin)",
         steps=[Step("ssh", device="admin", suite="suites/secfunc_all_ssh.yaml")],
-        note="25 testcases: password/lockout config, boot/self-test, audit, crypto, ACL/VLAN",
+        note="17 testcases: password/lockout config, on-demand self-test, crypto, VLAN -- nothing that reads swlog",
     ),
     Phase(
         "switch-lowpriv",
@@ -136,7 +136,7 @@ PHASES: list[Phase] = [
         "switch-console",
         "Switch checks over the serial console (secureadmin)",
         steps=[Step("console", device="secureadmin", suite="suites/secfunc_console.yaml", needs_console=True)],
-        note="password history, SNMPv3, lockout, service disable, IP ban -- each cuts this host off the network",
+        note="14 testcases: everything needing secureadmin (swlog reads) or the console (service disable, IP ban)",
     ),
 ]
 

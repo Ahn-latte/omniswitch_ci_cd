@@ -119,7 +119,7 @@ actually changes. Progress is shown per transport as it goes.
 console, then SSH, then — in the API repo — API and browser. Phase 1 of the
 integrated run.
 
-### `suites/secfunc_all_ssh.yaml` — SSH, `admin` (25)
+### `suites/secfunc_all_ssh.yaml` — SSH, `admin` (17)
 
 | ID | Name |
 |---|---|
@@ -128,26 +128,22 @@ integrated run.
 | `TC-IA-131` | Authentication failure lockout threshold |
 | `TC-IA-132` | Configurable lockout duration |
 | `TC-IA-151` | Weak crypto algorithm rejected for password storage |
-| `TC-FC-311` | IP-based ACL policy configuration |
 | `TC-FC-312` | IEEE 802.1Q VLAN tagging |
 | `TC-SM-41` | Remote service enable/disable |
 | `TC-SM-441` | Firmware version display |
 | `TC-SM-442` | Firmware hash verification |
 | `TC-SM-461` | Session inactivity timeout |
-| `TC-ST-511` | Hardware self-test at boot |
-| `TC-ST-512` | Process self-test at boot |
 | `TC-ST-513` | On-demand hardware and process self-test |
-| `TC-ST-521` | Firmware image integrity check at boot |
-| `TC-ST-523` | Config file integrity check on backup/restore |
 | `TC-DP-711` | Encrypted channel for remote access |
 | `TC-DP-712` | Syslog over TLS |
 | `TC-DP-713` | WebView TLS handshake negotiates TLS 1.2 — needs `capture_interface` |
 | `TC-DP-716` | TLS 1.2 or higher |
 | `TC-DP-717` | SSH v2 support |
-| `TC-AU-811` | Audit data generation |
-| `TC-AU-821` | Audit data required fields |
-| `TC-AU-831` | Audit trail overwrite on threshold exceed |
 | `TC-AU-842` | Audit data export to external log server |
+
+Nothing here reads `show log swlog`. That command is secureadmin-only, so as
+`admin` it just drops the session — the eight testcases that need swlog as
+evidence live in the console suite below.
 
 ### `suites/secfunc_lowpriv.yaml` — SSH, `lowpriv` (1)
 
@@ -155,18 +151,34 @@ integrated run.
 |---|---|
 | `TC-AU-841` | Audit data access restriction (low-privilege account) |
 
-### `suites/secfunc_console.yaml` — serial console, `secureadmin` (6)
+This is the one testcase whose point is that swlog *cannot* be read: refusal is
+the pass condition. Do not confuse it with the eight below, which are the
+opposite — they only work if swlog can be read.
 
-Order matters here; each entry cuts this machine off the switch a little more.
+### `suites/secfunc_console.yaml` — serial console, `secureadmin` (14)
 
-| ID | Name |
-|---|---|
-| `TC-IA-124` | Password history prevents reuse of a recent password |
-| `TC-SM-42` | SNMPv3 account and trap station are created and audited |
-| `TC-SM-43` | SNMPv3 get/set works for read-write and is refused for read-only |
-| `TC-IA-133` | SSH lockout actually triggers after 3 failed attempts |
-| `TC-SM-41B` | Disabling every IP service actually blocks all network management |
-| `TC-IA-134` | SSH IP ban actually triggers at the IP lockout threshold |
+Two different reasons put a testcase here: it takes this machine off the
+network (so only an out-of-band session can verify and recover), or it reads
+`show log swlog`, which only `secureadmin` may do.
+
+Order matters; the destructive entries are last and must stay there.
+
+| ID | Name | Why console |
+|---|---|---|
+| `TC-IA-124` | Password history prevents reuse of a recent password | global setting |
+| `TC-FC-311` | IP-based ACL policy configuration | swlog |
+| `TC-SM-42` | SNMPv3 account and trap station are created and audited | swlog |
+| `TC-SM-43` | SNMPv3 get/set works for read-write and is refused for read-only | swlog |
+| `TC-ST-511` | Hardware self-test at boot | swlog |
+| `TC-ST-512` | Process self-test at boot | swlog |
+| `TC-ST-521` | Firmware image integrity check at boot | swlog |
+| `TC-ST-523` | Config file integrity check on backup/restore | swlog |
+| `TC-AU-811` | Audit data generation | swlog |
+| `TC-AU-821` | Audit data required fields | swlog |
+| `TC-AU-831` | Audit trail overwrite on threshold exceed | swlog |
+| `TC-IA-133` | SSH lockout actually triggers after 3 failed attempts | locks an account |
+| `TC-SM-41B` | Disabling every IP service actually blocks all network management | kills the network |
+| `TC-IA-134` | SSH IP ban actually triggers at the IP lockout threshold | bans this host |
 
 > **`TC-IA-124` assumes the `admin` account's current password equals
 > `$test_password`**, since the reuse case attempts a change to that same
@@ -338,7 +350,7 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_console.
 함)을 콘솔, SSH 순으로 실행한 뒤 — API 저장소에서 — API와 브라우저로
 실행합니다. 통합 실행의 1단계입니다.
 
-#### `suites/secfunc_all_ssh.yaml` — SSH, `admin` (25개)
+#### `suites/secfunc_all_ssh.yaml` — SSH, `admin` (17개)
 
 | ID | 이름 |
 |---|---|
@@ -347,26 +359,22 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_console.
 | `TC-IA-131` | 인증 실패 잠금 임계값 |
 | `TC-IA-132` | 설정 가능한 잠금 지속시간 |
 | `TC-IA-151` | 비밀번호 저장 시 취약한 암호 알고리즘 거부 |
-| `TC-FC-311` | IP 기반 ACL 정책 설정 |
 | `TC-FC-312` | IEEE 802.1Q VLAN 태깅 |
 | `TC-SM-41` | 원격 서비스 활성화/비활성화 |
 | `TC-SM-441` | 펌웨어 버전 표시 |
 | `TC-SM-442` | 펌웨어 해시 검증 |
 | `TC-SM-461` | 세션 비활성 타임아웃 |
-| `TC-ST-511` | 부팅 시 하드웨어 자체 테스트 |
-| `TC-ST-512` | 부팅 시 프로세스 자체 테스트 |
 | `TC-ST-513` | 요청 시 하드웨어/프로세스 자체 테스트 |
-| `TC-ST-521` | 부팅 시 펌웨어 이미지 무결성 검사 |
-| `TC-ST-523` | 백업/복원 시 설정 파일 무결성 검사 |
 | `TC-DP-711` | 원격 접속 암호화 채널 |
 | `TC-DP-712` | TLS 기반 Syslog |
 | `TC-DP-713` | WebView TLS 핸드셰이크가 TLS 1.2로 협상됨 — `capture_interface` 필요 |
 | `TC-DP-716` | TLS 1.2 이상 |
 | `TC-DP-717` | SSH v2 지원 |
-| `TC-AU-811` | 감사 데이터 생성 |
-| `TC-AU-821` | 감사 데이터 필수 필드 |
-| `TC-AU-831` | 임계값 초과 시 감사 기록 덮어쓰기 |
 | `TC-AU-842` | 외부 로그 서버로 감사 데이터 내보내기 |
+
+여기에는 `show log swlog`를 읽는 시험이 없습니다. 이 명령은 secureadmin
+전용이라 `admin` 계정으로는 세션이 끊길 뿐이며, swlog를 증거로 삼아야 하는
+여덟 개는 아래 콘솔 스위트에 있습니다.
 
 #### `suites/secfunc_lowpriv.yaml` — SSH, `lowpriv` (1개)
 
@@ -374,19 +382,34 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_console.
 |---|---|
 | `TC-AU-841` | 감사 데이터 접근 제한(저권한 계정) |
 
-#### `suites/secfunc_console.yaml` — 시리얼 콘솔, `secureadmin` (6개)
+swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 — 거부되는 것이 곧
+성공 조건입니다. 아래 여덟 개와 혼동하지 마세요. 그쪽은 정반대로 swlog를
+읽을 수 있어야 성립합니다.
 
-여기서는 순서가 중요합니다. 항목이 하나씩 실행될 때마다 이 머신은 스위치와
-조금씩 더 단절됩니다.
+#### `suites/secfunc_console.yaml` — 시리얼 콘솔, `secureadmin` (14개)
 
-| ID | 이름 |
-|---|---|
-| `TC-IA-124` | 비밀번호 이력이 최근 비밀번호 재사용을 방지 |
-| `TC-SM-42` | SNMPv3 계정과 트랩 스테이션 생성 및 감사 |
-| `TC-SM-43` | SNMPv3 get/set이 읽기/쓰기 계정에서는 동작, 읽기 전용 계정에서는 거부 |
-| `TC-IA-133` | SSH 잠금이 3회 실패 후 실제로 발동 |
-| `TC-SM-41B` | 모든 IP 서비스 비활성화 시 실제로 모든 네트워크 관리 차단 |
-| `TC-IA-134` | SSH IP 차단이 IP 잠금 임계값에서 실제로 발동 |
+두 가지 이유 중 하나로 여기 모입니다: 이 머신을 네트워크에서 끊어버리거나
+(그래서 대역 외 세션만이 검증과 복구를 할 수 있음), `show log swlog`를 읽어야
+하거나(이 명령은 `secureadmin`만 가능).
+
+순서가 중요합니다. 파괴적인 항목이 마지막이며 그대로 두어야 합니다.
+
+| ID | 이름 | 콘솔인 이유 |
+|---|---|---|
+| `TC-IA-124` | 비밀번호 이력이 최근 비밀번호 재사용을 방지 | 전역 설정 |
+| `TC-FC-311` | IP 기반 ACL 정책 설정 | swlog |
+| `TC-SM-42` | SNMPv3 계정과 트랩 스테이션 생성 및 감사 | swlog |
+| `TC-SM-43` | SNMPv3 get/set이 읽기/쓰기 계정에서는 동작, 읽기 전용 계정에서는 거부 | swlog |
+| `TC-ST-511` | 부팅 시 하드웨어 자체 테스트 | swlog |
+| `TC-ST-512` | 부팅 시 프로세스 자체 테스트 | swlog |
+| `TC-ST-521` | 부팅 시 펌웨어 이미지 무결성 검사 | swlog |
+| `TC-ST-523` | 백업/복원 시 설정 파일 무결성 검사 | swlog |
+| `TC-AU-811` | 감사 데이터 생성 | swlog |
+| `TC-AU-821` | 감사 데이터 필수 필드 | swlog |
+| `TC-AU-831` | 임계값 초과 시 감사 기록 덮어쓰기 | swlog |
+| `TC-IA-133` | SSH 잠금이 3회 실패 후 실제로 발동 | 계정을 잠금 |
+| `TC-SM-41B` | 모든 IP 서비스 비활성화 시 실제로 모든 네트워크 관리 차단 | 네트워크 차단 |
+| `TC-IA-134` | SSH IP 차단이 IP 잠금 임계값에서 실제로 발동 | 이 호스트를 차단 |
 
 > **`TC-IA-124`는 `admin` 계정의 현재 비밀번호가 `$test_password`와 같다고
 > 가정합니다** — 재사용 케이스가 그 값으로 변경을 시도하기 때문입니다.

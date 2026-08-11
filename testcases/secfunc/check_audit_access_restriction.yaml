@@ -10,17 +10,19 @@ validations:
     type: contains
     command: show log swlog
     expected: "ERROR: Authorization failed"
-  # 스위치는 삭제(swlog clear)를 secureadmin 전용 안내가 아니라 일반 권한 에러로 거부함
-  # (복사(cp)는 "allowed only for secureadmin" 으로 거부). 어느 쪽이든 차단된 것이 요점이라
-  # 각 명령이 실제로 내놓는 거부 메시지를 그대로 기대함.
+  # 삭제(swlog clear)와 복사(cp) 모두 secureadmin 전용 안내로 거부되어야 함.
+  # 참고: 이 스위치의 현재 펌웨어는 삭제에 대해 일반 권한 에러
+  # ("ERROR: Authorization failed. No functional privileges for this command.")
+  # 를 돌려줌 - 차단은 되지만 안내 문구가 복사 쪽과 다름. 여기서는 의도된 문구를
+  # 기대하므로, 그 차이는 이 검증의 실패로 드러남.
   - name: 감사로그 삭제 차단
     type: contains
     command: swlog clear all
-    expected: "ERROR: Authorization failed"
+    expected: "ERROR: This command is allowed only for secureadmin"
   - name: 감사로그 복사 차단
     type: contains
     command: cp swlog_chassis1
-    expected: "allowed only for secureadmin"
+    expected: "This command is allowed only for secureadmin"
 cleanup: []
 continue_on_failure: true
 timeout: 60

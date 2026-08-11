@@ -2,7 +2,7 @@ id: TC-FC-311
 name: IP-based ACL policy configuration
 description: IP 주소 기반 ACL(QoS policy) 설정 기능 및 설정 시 감사데이터 생성 확인 (3.1.1). 실제 차단은 별도 Ping 시험.
 feature: system
-tags: [secfunc, flow, required]
+tags: [secfunc, flow, required, secureadmin, console]
 severity: high
 setup:
   - action: cli

@@ -2,7 +2,7 @@ id: TC-AU-821
 name: Audit data required fields
 description: 감사 데이터에 일시/유형/주체/결과 포함 확인 (8.2.1). 주체 IP는 SSH 로그인 로그로 확인.
 feature: system
-tags: [secfunc, audit, required]
+tags: [secfunc, audit, required, secureadmin, console]
 severity: high
 setup:
   - action: save_config

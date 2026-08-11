@@ -2,7 +2,7 @@ id: TC-AU-831
 name: Audit trail overwrite on threshold exceed
 description: 감사증적 저장용량 오버라이팅 설정 확인 - 임계치를 최저 한도인 50%로 설정하고 로그 레벨 상향 및 flash 파일 크기 축소(125)로 오버라이팅을 유도한 뒤, 감사데이터 내 용량초과 알림 기록 확인 (8.3.1)
 feature: system
-tags: [secfunc, audit, required]
+tags: [secfunc, audit, required, secureadmin, console]
 severity: high
 setup:
   - action: cli

@@ -2,7 +2,7 @@ id: TC-ST-521
 name: Firmware image integrity check at boot
 description: 장비 구동 시 펌웨어 이미지 무결성 검사 수행 확인 (5.2.1)
 feature: system
-tags: [secfunc, selftest, required, boot]
+tags: [secfunc, selftest, required, boot, secureadmin, console]
 severity: high
 setup: []
 validations:

@@ -1,32 +1,59 @@
 name: secfunc_console
 description: >-
-  시리얼 콘솔(secureadmin)로만 돌릴 수 있는 secfunc 항목. 반드시
+  시리얼 콘솔(secureadmin)로 돌리는 secfunc 항목(14개). 반드시
   --device secureadmin 으로 실행:
 
     switchtest run --device secureadmin --suite suites/secfunc_console.yaml
 
-  이 다섯 개가 콘솔을 요구하는 이유는 제각기 다르지만 결론은 같음 - 시험 도중
-  이 PC가 네트워크로는 스위치에 닿을 수 없게 됨. swlog 열람 권한이 secureadmin
-  전용인 것도 겹침. lab.yaml 의 console.port 가 실제 COM 포트와 맞아야 함.
+  여기 모인 이유는 둘 중 하나임:
+
+  (a) 시험 도중 이 PC가 네트워크로는 스위치에 닿을 수 없게 됨 - 그래서 대역 외인
+      콘솔로만 검증도 복구도 가능함.
+  (b) `show log swlog` 로 감사 증거를 읽어야 함 - 이 명령은 secureadmin 전용이라
+      admin 계정으로는 세션이 끊길 뿐임.
+
+  (b)에 해당하는 여덟 개(TC-FC-311, TC-ST-511/512/521/523, TC-AU-811/821/831)는
+  원래 secfunc_all_ssh.yaml 에 있었음. 주의할 구분: 이들은 "swlog가 안 보이는 것"을
+  증명하는 시험이 아니라 반대로 swlog를 읽어야 성립하는 시험이라 읽을 수 있는
+  계정으로 옮긴 것임. 접근이 차단되는지를 증명하는 시험은 TC-AU-841 이고 그건
+  저권한 계정으로 돌아야 하므로 secfunc_lowpriv.yaml 에 그대로 있음.
+
+  lab.yaml 의 console.port 가 실제 COM 포트와 맞아야 함.
 
   순서가 중요함. 파괴적인 것을 뒤로 보냈으므로 바꾸지 말 것:
-    1. TC-IA-124    비밀번호 이력 - admin 비밀번호를 바꿨다가 되돌림(전역 password-history 조작)
-    2. TC-SM-42/43  SNMPv3 계정·스테이션 생성과 get/set 권한 - 네트워크 정상 필요
+    1. TC-IA-124    비밀번호 이력 - 전역 password-history 를 baseline 으로 고정하고
+                    재사용이 거부되는지만 봄(실제로 비밀번호를 바꾸지는 않음)
+    2. TC-FC-311    ACL 정책 - 설정 반영과 그 기록이 swlog 에 남는지
+    3. TC-SM-42/43  SNMPv3 계정·스테이션 생성과 get/set 권한 - 네트워크 정상 필요
        (SNMP 요청은 UDP/161로 나감)
-    3. TC-IA-133    계정 잠금 - admin 계정을 잠갔다가 푼다
-    4. TC-SM-41B    모든 IP 서비스 차단 - SSH/API/WebView가 전부 죽었다 살아남
-    5. TC-IA-134    IP 차단 - 이 PC의 IP가 차단됨. 마지막이어야 함
+    4. TC-ST-511/512/521/523  부팅 시 자체검사·무결성 결과 - swlog 읽기
+    5. TC-AU-811/821/831      감사데이터 생성·필수필드·임계치 - swlog 읽기
+    6. TC-IA-133    계정 잠금 - admin 계정을 잠갔다가 푼다
+    7. TC-SM-41B    모든 IP 서비스 차단 - SSH/API/WebView가 전부 죽었다 살아남
+    8. TC-IA-134    IP 차단 - 이 PC의 IP가 차단됨. 마지막이어야 함
 
   경고: cleanup 없이 중단되면(프로세스 강제 종료 등) 스위치가 이 PC를 차단하거나
   서비스가 꺼진 채로 남음. 콘솔에서 복구할 것:
     aaa switch-access banned-ip all release
     ip service ssh admin-state enable
-  TC-IA-124 가 중단되면 admin 비밀번호가 Qet135!#% 로, password-history 가 0으로 남을 수
-  있음. 콘솔에서: user admin1 password 12#qweASD / user password-history 3
 tests:
+  # 1.x 식별/인증
   - ../testcases/secfunc/check_password_history_enforcement.yaml
+  # 3.x 흐름 제어 - 설정 반영 + swlog 기록
+  - ../testcases/secfunc/check_acl_policy.yaml
+  # 4.x 보안 관리 - SNMP는 네트워크(UDP/161)가 살아 있어야 하므로 파괴적 항목보다 앞
   - ../testcases/secfunc/check_snmpv3_account_station.yaml
   - ../testcases/secfunc/check_snmpv3_get_set_permissions.yaml
+  # 5.x 자체시험 - 부팅 시 결과는 swlog 에만 남음
+  - ../testcases/secfunc/check_boot_hw_selftest.yaml
+  - ../testcases/secfunc/check_boot_process_selftest.yaml
+  - ../testcases/secfunc/check_boot_integrity.yaml
+  - ../testcases/secfunc/check_config_integrity.yaml
+  # 8.x 감사 - swlog 본문 읽기
+  - ../testcases/secfunc/check_audit_generation.yaml
+  - ../testcases/secfunc/check_audit_fields.yaml
+  - ../testcases/secfunc/check_swlog_threshold.yaml
+  # 파괴적 - 반드시 이 순서로 마지막
   - ../testcases/secfunc/check_lockout_enforcement_ssh.yaml
   - ../testcases/secfunc/check_ip_service_disabled_enforcement.yaml
   - ../testcases/secfunc/check_ip_ban_enforcement_ssh.yaml

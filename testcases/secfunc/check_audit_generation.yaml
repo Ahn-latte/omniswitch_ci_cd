@@ -2,7 +2,7 @@ id: TC-AU-811
 name: Audit data generation
 description: 인증 성공/실패, 펌웨어 업데이트, 무결성 검사, 서비스 활성화/비활성화 감사 데이터 생성 확인 (8.1.1)
 feature: system
-tags: [secfunc, audit, required]
+tags: [secfunc, audit, required, secureadmin, console]
 severity: high
 setup:
   - action: cli

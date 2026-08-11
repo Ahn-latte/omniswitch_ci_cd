@@ -2,7 +2,7 @@ id: TC-ST-511
 name: Hardware self-test at boot
 description: 장비 구동 시 주요 하드웨어(CPU/메모리/플래시/NI/전원) 자체검사 수행 확인 (5.1.1). 부팅 로그를 swlog에서 사후 조회.
 feature: system
-tags: [secfunc, selftest, required, boot]
+tags: [secfunc, selftest, required, boot, secureadmin, console]
 severity: high
 setup: []
 validations:

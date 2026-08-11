@@ -2,7 +2,7 @@ id: TC-ST-512
 name: Process self-test at boot
 description: 장비 구동 시 주요 프로세스(AAA/Config Manager/Network/QoS/VLAN/L2/L3) 자체검사 수행 확인 (5.1.2)
 feature: system
-tags: [secfunc, selftest, required, boot]
+tags: [secfunc, selftest, required, boot, secureadmin, console]
 severity: high
 setup: []
 validations:
