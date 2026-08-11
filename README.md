@@ -180,6 +180,13 @@ Order matters; the destructive entries are last and must stay there.
 | `TC-SM-41B` | Disabling every IP service actually blocks all network management | kills the network |
 | `TC-IA-134` | SSH IP ban actually triggers at the IP lockout threshold | bans this host |
 
+> **Known firmware bug — `TC-AU-811` is expected to fail.** Its "firmware
+> update" check looks for `AOS upgrade or downgrade complete` in swlog, and
+> this firmware never writes that record even when an upgrade really happens.
+> The failure is the finding: leave it failing rather than relaxing the
+> assertion. Its other four checks (login success/failure, integrity, service
+> enable/disable) pass.
+
 > **`TC-IA-124` assumes the `admin` account's current password equals
 > `$test_password`**, since the reuse case attempts a change to that same
 > value. It never actually changes the password — rejection is the pass
@@ -410,6 +417,12 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 | `TC-IA-133` | SSH 잠금이 3회 실패 후 실제로 발동 | 계정을 잠금 |
 | `TC-SM-41B` | 모든 IP 서비스 비활성화 시 실제로 모든 네트워크 관리 차단 | 네트워크 차단 |
 | `TC-IA-134` | SSH IP 차단이 IP 잠금 임계값에서 실제로 발동 | 이 호스트를 차단 |
+
+> **알려진 펌웨어 버그 — `TC-AU-811`은 실패하는 것이 정상입니다.** "펌웨어
+> 업데이트" 검증이 swlog에서 `AOS upgrade or downgrade complete`를 찾는데, 이
+> 펌웨어는 실제로 업그레이드를 수행해도 그 기록을 남기지 않습니다. 이 실패
+> 자체가 발견 사항이므로, 검증을 완화해 통과시키지 말고 그대로 두세요. 나머지
+> 네 검증(인증 성공/실패, 무결성, 서비스 활성화/비활성화)은 통과합니다.
 
 > **`TC-IA-124`는 `admin` 계정의 현재 비밀번호가 `$test_password`와 같다고
 > 가정합니다** — 재사용 케이스가 그 값으로 변경을 시도하기 때문입니다.
