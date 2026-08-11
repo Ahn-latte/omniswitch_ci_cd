@@ -1,4 +1,6 @@
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Iterator
 import logging
 import platform
 import socket
@@ -22,6 +24,11 @@ class SSHTransport:
     auth_secondary: str | None = None
     timeout_socket: int = 15
     timeout_ops: int = 30
+    # scrapli caps a single read from the transport at `timeout_transport`
+    # independently of `timeout_ops`. Left at scrapli's 30s default it silently
+    # becomes the real ceiling for any slow command, which is what a per-call
+    # `timeout=` is supposed to control -- see `_operation_timeout`.
+    timeout_transport: int = 30
     auth_strict_key: bool = False
 
     def __post_init__(self) -> None:
@@ -41,6 +48,7 @@ class SSHTransport:
             auth_strict_key=self.auth_strict_key,
             timeout_socket=self.timeout_socket,
             timeout_ops=self.timeout_ops,
+            timeout_transport=self.timeout_transport,
             transport=transport_name,
         )
         try:
@@ -50,10 +58,31 @@ class SSHTransport:
                 f"Failed to connect to {self.host}:{self.port} using transport '{transport_name}': {exc}"
             ) from exc
 
+    @contextmanager
+    def _operation_timeout(self, timeout: int) -> Iterator[None]:
+        """Let a per-call ``timeout`` govern the transport read as well.
+
+        ``timeout_ops`` bounds the whole operation, but scrapli bounds each
+        individual read by ``timeout_transport`` (30s by default), so asking
+        for a 90s command still dies at 30 -- with "timed out reading from
+        transport" rather than anything that points here. Raise the transport
+        ceiling for the duration of the call, never lower it, and always put
+        the connection's own value back.
+        """
+        connection = self._connection
+        previous = connection.timeout_transport
+        if timeout > previous:
+            connection.timeout_transport = timeout
+        try:
+            yield
+        finally:
+            connection.timeout_transport = previous
+
     def send_command(self, command: str, timeout: int = 30) -> str:
         if self._connection is None:
             raise ConnectionError("SSH connection is not open")
-        response = self._connection.send_command(command, timeout_ops=timeout)
+        with self._operation_timeout(timeout):
+            response = self._connection.send_command(command, timeout_ops=timeout)
         return str(response.result)
 
     def send_commands(self, commands: list[str], timeout: int = 30) -> list[str]:
@@ -71,7 +100,8 @@ class SSHTransport:
         """
         if self._connection is None:
             raise ConnectionError("SSH connection is not open")
-        response = self._connection.send_interactive(interactions, timeout_ops=timeout)
+        with self._operation_timeout(timeout):
+            response = self._connection.send_interactive(interactions, timeout_ops=timeout)
         return str(response.result)
 
     def close(self) -> None:

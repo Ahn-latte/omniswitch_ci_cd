@@ -10,10 +10,13 @@ validations:
     type: contains
     command: show log swlog
     expected: "ERROR: Authorization failed"
+  # 스위치는 삭제(swlog clear)를 secureadmin 전용 안내가 아니라 일반 권한 에러로 거부함
+  # (복사(cp)는 "allowed only for secureadmin" 으로 거부). 어느 쪽이든 차단된 것이 요점이라
+  # 각 명령이 실제로 내놓는 거부 메시지를 그대로 기대함.
   - name: 감사로그 삭제 차단
     type: contains
     command: swlog clear all
-    expected: "allowed only for secureadmin"
+    expected: "ERROR: Authorization failed"
   - name: 감사로그 복사 차단
     type: contains
     command: cp swlog_chassis1

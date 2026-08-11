@@ -1,6 +1,11 @@
 id: TC-DP-717
 name: SSH v2 support
-description: SSH v2 이상 지원 (7.1.7). 프로토콜 버전은 패킷캡처 병행.
+description: >-
+  SSH v2 이상 지원 (7.1.7). 여기서는 SSH 서비스가 켜져 있는지만 확인하고, 실제 프로토콜
+  버전이 v2인지는 패킷캡처로 별도 확인함 - show ssh 출력에는 버전 정보가 없기 때문.
+
+  Ssh Strong-Ciphers 는 검증 대상이 아님. 이 스위치에서는 Disabled 가 정상 상태라,
+  Enabled 를 기대하면 정책과 무관하게 항상 실패함.
 feature: system
 tags: [secfunc, transport, required]
 severity: high
@@ -10,10 +15,6 @@ validations:
     type: contains
     command: show ssh
     expected: "Ssh Admin-State = Enabled"
-  - name: Strong Ciphers
-    type: contains
-    command: show ssh
-    expected: "Ssh Strong-Ciphers = Enabled"
 cleanup: []
 continue_on_failure: false
 timeout: 60

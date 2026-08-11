@@ -31,8 +31,7 @@ description: >-
   경고: cleanup이 실행되지 않은 채(예: 프로세스 강제 종료) 끝나면 모든 원격 관리 서비스가
   꺼진 상태로 남아 네트워크로는 접속이 불가능해짐. 그 경우 콘솔에서
   ip service ssh admin-state enable 로 복구할 것. (ip service https admin-state 는 8.10에서
-  deprecated - WebView를 되살려야 하면 ip service http admin-state enable 과
-  webview force-ssl 을 쓸 것.)
+  deprecated - WebView를 되살리려면 ip service http admin-state enable 을 쓸 것.)
 feature: system
 tags: [secfunc, mgmt, audit, required, secureadmin, console]
 severity: high
@@ -95,21 +94,23 @@ cleanup:
   #
   # WebView comes back on. On 8.10 `ip service https admin-state` is deprecated
   # (the switch answers with an ERROR, which apply_config rightly treats as a
-  # failed command) -- the 443 listener is `ip service http admin-state` plus
-  # `webview force-ssl`, which is why those two are what gets restored. Leaving
-  # WebView off would strand the API/WebView half of the integrated run, which
-  # has nothing to connect to, and drift from the posture TC-CIS-003/004 assert.
+  # failed command) -- the 443 listener is restored with
+  # `ip service http admin-state enable`, which is what brings WebView back.
+  # Leaving WebView off would strand the API/WebView half of the integrated run,
+  # which has nothing to connect to, and drift from the posture TC-CIS-003/004
+  # assert.
+  #
+  # `webview force-ssl` is deliberately NOT reissued here: bare, it is an
+  # incomplete command on this firmware ("ERROR: Incomplete command"), which
+  # fails the whole cleanup. force-ssl is a webview setting rather than a
+  # service state, so `ip service all admin-state disable` never cleared it and
+  # there is nothing to restore.
   - action: cli
     commands:
       - ip service ssh admin-state enable
       - ip service snmp admin-state enable
       - ip service ntp admin-state enable
       - ip service http admin-state enable
-      # force-ssl is a webview setting rather than a service state, so
-      # `ip service all admin-state disable` does not clear it. Re-asserting it
-      # is belt and braces, and deliberately not error-tolerant: if this ever
-      # does fail, WebView is serving plaintext on 80 and that must be loud.
-      - webview force-ssl
       - ip service telnet admin-state disable
       - ip service ftp admin-state disable
 continue_on_failure: false
