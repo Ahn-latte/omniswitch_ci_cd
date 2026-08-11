@@ -279,7 +279,14 @@ class SerialConsoleTransport:
             timeout=window,
             expecting="result of the password change",
         )
-        accepted = not CURRENT_PASSWORD_PROMPT_PATTERN.search(_tail(result))
+        # `rstrip()` rather than reading the last line: the read stops as soon
+        # as the buffer ends with "Enter current password:", but the console
+        # often sends a bare CR right behind the prompt, and whether that CR
+        # lands in the same chunk is pure timing. `\s*$` in the pattern
+        # tolerates it, so matching against the stripped whole is stable --
+        # taking the literal last line saw "" whenever the CR arrived in time
+        # and reported a *rejected* password as accepted.
+        accepted = CURRENT_PASSWORD_PROMPT_PATTERN.search(result.rstrip()) is None
         return accepted, _change_dialogue_message(result)
 
     def _logout(self, timeout: int, stale: bool = False) -> str:

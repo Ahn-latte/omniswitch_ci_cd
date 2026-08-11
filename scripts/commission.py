@@ -147,8 +147,22 @@ def stage_first_login(transport: SerialConsoleTransport, lab: LabConfig) -> Stag
         )
         if accepted:
             stage.error = (
-                f"The switch ACCEPTED a policy-violating password ({candidate!r}). "
-                f"That password is now live on the switch -- change it by hand."
+                f"The switch ACCEPTED a policy-violating password ({candidate!r}), so it is "
+                f"now the live password for {settings.factory_username} -- set a compliant one "
+                f"by hand from the console before doing anything else. "
+                f"(The switch said: {_condense(message)})"
+            )
+            return stage
+        if expected_fragment.lower() not in message.lower():
+            # Refused, but not for the reason this candidate was built to
+            # provoke. The account is untouched -- the dialogue is still open
+            # at "Enter current password:" -- so this is a testing problem
+            # (wrong expected wording, or a candidate that violates two rules
+            # and trips the other one first), not a switch state problem.
+            stage.error = (
+                f"{candidate!r} was refused, but not for the expected reason "
+                f"({expected_fragment!r}). Nothing on the switch changed. "
+                f"The switch said: {_condense(message)}"
             )
             return stage
 

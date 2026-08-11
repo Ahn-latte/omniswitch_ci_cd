@@ -323,3 +323,36 @@ def test_accepted_new_password_returns_to_the_login_prompt(fake_serial) -> None:
     accepted, _message = transport.change_password_at_login("switch", "12#qweASD")
 
     assert accepted is True
+
+
+def test_rejection_is_detected_even_with_a_trailing_cr(fake_serial) -> None:
+    """The console usually sends a bare CR right behind "Enter current
+    password:", and whether it lands in the same read chunk is timing. Reading
+    the literal last line saw "" in that case and called a *rejected* password
+    accepted -- which aborted commissioning with the alarming (and false)
+    claim that a weak password was now live on the switch.
+    """
+    fake_serial(
+        {
+            "": "\r\nlogin: ",
+            "secureadmin": "\r\nPassword: ",
+            "switch": [
+                "\r\nPassword policy mismatch, please change password.\r\nEnter current password: ",
+                "\r\nEnter new password: ",
+            ],
+        }
+    )
+    transport = _factory_transport()
+    transport.open_port_only()
+    transport.await_login_prompt()
+    transport.submit_login("secureadmin", "switch")
+
+    transport._connection.script["12#qweasd"] = [
+        "\r\nRetype new password: ",
+        # Note the trailing \r after the prompt -- the whole point of the test.
+        "\r\nPassword must contain at least 1 English uppercase character(s).\r\nEnter current password: \r",
+    ]
+    accepted, message = transport.change_password_at_login("switch", "12#qweasd")
+
+    assert accepted is False
+    assert "uppercase" in message
