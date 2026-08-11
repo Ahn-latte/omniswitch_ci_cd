@@ -137,8 +137,6 @@ def _is_ignorable_windows_close_error(exc: BaseException) -> bool:
 
 
 def _configure_paramiko_logging() -> None:
-    if platform.system().lower() != "windows":
-        return
     logger = logging.getLogger("paramiko.transport")
     if any(isinstance(existing, _ParamikoSocketNoiseFilter) for existing in logger.filters):
         return
@@ -146,8 +144,24 @@ def _configure_paramiko_logging() -> None:
 
 
 class _ParamikoSocketNoiseFilter(logging.Filter):
+    """Drop paramiko's own tracebacks for conditions this project handles.
+
+    These are logged from paramiko's transport thread, so they print a full
+    traceback even though the exception is caught and dealt with here. That
+    reads like a crash in the middle of a run that is in fact fine.
+
+    Nothing is silenced that the caller is not told about some other way:
+    a banner read that fails is reported by the retry loop ("switch not
+    reachable yet ..."), and a failure that survives every retry still raises
+    ConnectionError with the host and transport in the message.
+    """
+
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage().lower()
-        if "socket exception:" in message and "10038" in message:
+        if platform.system().lower() == "windows" and "socket exception:" in message and "10038" in message:
+            return False
+        # What a still-banned switch looks like: it accepts the TCP connection
+        # and then closes it without sending a banner.
+        if "error reading ssh protocol banner" in message:
             return False
         return True

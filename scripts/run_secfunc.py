@@ -37,6 +37,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from switchtest.domain.enums import TransportType  # noqa: E402
 from switchtest.domain.lab import LabConfig  # noqa: E402
 from switchtest.exceptions import LoaderError  # noqa: E402
 from switchtest.infrastructure.loaders.lab import load_lab  # noqa: E402
@@ -258,20 +259,70 @@ def connect_with_retry(driver, attempts: int = 6, delay: int = 5) -> None:
             time.sleep(delay)
 
 
-def manage_accounts(lab: LabConfig, create: bool) -> None:
-    """Create or delete the provisioned accounts over SSH as the admin account.
+def serial_device(lab: LabConfig):
+    """The first account that reaches the switch over the console, if any."""
+    for device in lab.devices().values():
+        if device.transport == TransportType.SERIAL:
+            return device
+    return None
 
-    SSH rather than the console on purpose: this runs before and after every
-    phase, and requiring the serial cable to provision would mean --skip-console
-    could not skip anything.
+
+def open_teardown_session(lab: LabConfig):
+    """A session to remove accounts with, over whichever path still works.
+
+    SSH first, to keep `--skip-console` runs working. But teardown runs
+    immediately after the console phase, whose last testcase deliberately bans
+    this host's IP (TC-IA-134) -- and a still-banned switch accepts the TCP
+    connection and then sends no SSH banner, so retrying the network path just
+    burns time and leaves real accounts on a real switch.
+
+    The console is out-of-band and demonstrably working at that moment, since
+    the phase that just finished used it. So fall back to it, and while there,
+    release the ban: that is what left the network unusable, and clearing it
+    means the next run does not start against a switch that is still blocking
+    this machine.
+    """
+    from switchtest.drivers.aos import AOSSwitchDriver
+
+    driver = AOSSwitchDriver(lab.devices()["admin"])
+    try:
+        connect_with_retry(driver, attempts=3)
+        return driver, False
+    except Exception as exc:  # noqa: BLE001 - the fallback is the whole point
+        device = serial_device(lab)
+        if device is None:
+            raise
+        print(
+            f"  SSH is not answering ({exc.__class__.__name__}); the console phase may have "
+            f"left this host banned. Falling back to the serial console."
+        )
+        console_driver = AOSSwitchDriver(device)
+        console_driver.connect()
+        console_driver.apply_config(
+            ["aaa switch-access banned-ip all release"], ignore_errors=True
+        )
+        print("  released any banned IPs over the console")
+        return console_driver, True
+
+
+def manage_accounts(lab: LabConfig, create: bool) -> None:
+    """Create or delete the provisioned accounts as the admin account.
+
+    Provisioning goes over SSH on purpose: it runs before every phase, and
+    requiring the serial cable to provision would mean --skip-console could not
+    skip anything. Teardown may fall back to the console -- see
+    open_teardown_session.
     """
     accounts = provisioned_accounts(lab)
     if not accounts:
         return
     from switchtest.drivers.aos import AOSSwitchDriver
 
-    driver = AOSSwitchDriver(lab.devices()["admin"])
-    connect_with_retry(driver)
+    if create:
+        driver = AOSSwitchDriver(lab.devices()["admin"])
+        connect_with_retry(driver)
+    else:
+        driver, _over_console = open_teardown_session(lab)
     try:
         for username, password, privileges in accounts:
             if create:

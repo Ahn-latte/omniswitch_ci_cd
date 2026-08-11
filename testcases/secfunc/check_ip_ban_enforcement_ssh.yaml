@@ -45,10 +45,30 @@ validations:
     pattern: 'Login attempt from station reached max threshold'
     timeout: 90
     reauth: true
+  # 해제까지 이 시험의 범위임. 예전에는 해제를 cleanup 에만 두고 결과를 아무도
+  # 보지 않았는데, 그러면 명령이 수락되기만 하고 효과가 없어도 조용히 지나감 -
+  # 실제로 해제 직후에도 이 PC의 SSH가 30초 넘게 막혀 있어 통합 실행의 계정
+  # 정리가 실패했고, 원인이 여기라는 것이 드러나지 않았음. 그래서 해제가
+  # "반영됐는지"까지 여기서 확인함.
+  - name: 밴 해제 명령이 거부되지 않음
+    type: not_contains
+    command: aaa switch-access banned-ip all release
+    expected: "ERROR"
+  - name: 차단 목록에서 이 PC의 IP가 사라짐
+    type: not_contains
+    command: show aaa switch-access banned-ip
+    expected: $station_ip
 cleanup:
+  # 검증 단계에서 이미 해제했더라도 다시 실행함: 검증이 중간에 실패해 여기까지
+  # 오면 밴이 남아 있을 수 있고, 그 상태로 끝나면 이 PC가 네트워크로 스위치에
+  # 접근할 수 없게 됨.
   - action: cli
     commands:
       - aaa switch-access banned-ip all release
+  # 해제가 스위치에 반영될 시간. 이게 없으면 통합 실행의 다음 단계(계정 정리)가
+  # 아직 막혀 있는 네트워크로 곧장 달려듦.
+  - action: wait
+    seconds: 5
   - action: ensure_unlocked
     username: admin1
 continue_on_failure: false
