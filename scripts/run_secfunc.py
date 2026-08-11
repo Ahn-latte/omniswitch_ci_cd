@@ -238,6 +238,26 @@ def provisioned_accounts(lab: LabConfig) -> list[tuple[str, str, str]]:
     ]
 
 
+def connect_with_retry(driver, attempts: int = 6, delay: int = 5) -> None:
+    """Open the session, retrying while the switch's SSH service settles.
+
+    The teardown call runs straight after the console phase, which turns every
+    IP service off and back on (TC-SM-41B) and bans then releases this host's IP
+    (TC-IA-134). For a few seconds after that the switch accepts the TCP
+    connection but sends no SSH banner, so a single attempt fails and leaves
+    real accounts on a real switch.
+    """
+    for remaining in range(attempts - 1, -1, -1):
+        try:
+            driver.connect()
+            return
+        except Exception as exc:  # noqa: BLE001 - retry whatever the transport raises
+            if not remaining:
+                raise
+            print(f"  switch not reachable yet ({exc}); retrying in {delay}s")
+            time.sleep(delay)
+
+
 def manage_accounts(lab: LabConfig, create: bool) -> None:
     """Create or delete the provisioned accounts over SSH as the admin account.
 
@@ -251,7 +271,7 @@ def manage_accounts(lab: LabConfig, create: bool) -> None:
     from switchtest.drivers.aos import AOSSwitchDriver
 
     driver = AOSSwitchDriver(lab.devices()["admin"])
-    driver.connect()
+    connect_with_retry(driver)
     try:
         for username, password, privileges in accounts:
             if create:

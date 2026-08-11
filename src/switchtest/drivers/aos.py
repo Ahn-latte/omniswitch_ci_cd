@@ -105,7 +105,15 @@ class AOSSwitchDriver(BaseSwitchDriver):
         # the "--->" arrows that pepper swlog output (e.g. "Process ---> Ok"),
         # cutting the read off at the first such line and dropping everything
         # after it. Anchoring makes it match only the trailing CLI prompt line.
-        prompt_pattern = f"^.*{re.escape(prompt)}\\s*$"
+        #
+        # Anchoring alone is not enough, because readers match against the
+        # buffer as it accumulates and `$` also matches at end-of-string: a
+        # chunk boundary landing right after "... CPU Status --->" (before
+        # " Ok" arrives) makes "^.*->$" match a half-read line and truncate the
+        # output. That is a constant hazard on the 115200 serial console. So
+        # also require the character before the prompt not to be part of an
+        # arrow -- "->" and "OS6900->" still match, "--->" no longer does.
+        prompt_pattern = f"^(?:.*[^-])?{re.escape(prompt)}\\s*$"
         output = transport.send_interactive(
             [
                 (command, "Password:", False),

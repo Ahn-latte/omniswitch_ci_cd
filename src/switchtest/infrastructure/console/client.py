@@ -60,8 +60,13 @@ class SerialConsoleTransport:
 
     def __post_init__(self) -> None:
         self._connection = None
+        # `(?:.*[^-])?` rather than `.*`: readers match this against the buffer
+        # as it fills, and `$` matches at end-of-string too, so a chunk boundary
+        # landing right after "... CPU Status --->" would otherwise look like a
+        # finished prompt line and cut the read short. Excluding a preceding
+        # "-" keeps "->" and "OS6900->" matching while "--->" does not.
         self._prompt_pattern = re.compile(
-            rf"(?m)^.*{re.escape(self.prompt)}\s*$",
+            rf"(?m)^(?:.*[^-])?{re.escape(self.prompt)}\s*$",
         )
 
     # -- lifecycle ---------------------------------------------------------
