@@ -1,6 +1,14 @@
 id: TC-AU-831
 name: Audit trail overwrite on threshold exceed
-description: 감사증적 저장용량 오버라이팅 설정 확인 - 임계치를 최저 한도인 50%로 설정하고 로그 레벨 상향 및 flash 파일 크기 축소(125)로 오버라이팅을 유도한 뒤, 감사데이터 내 용량초과 알림 기록 확인 (8.3.1)
+description: >-
+  감사증적 저장용량 오버라이팅 설정 확인 - 임계치를 최저 한도인 50%로 설정하고 로그 레벨
+  상향 및 flash 파일 크기 축소(125)로 오버라이팅을 유도한 뒤, 감사데이터 내 용량초과 알림
+  기록 확인 (8.3.1)
+
+  로그를 인위적으로 쌓는 구간은 `ip service ntp admin-state disable` 만 반복함. 이미
+  disable 상태에서 같은 명령을 다시 내도 CLI log 항목은 그대로 남으므로, enable 과
+  번갈아 칠 필요가 없음. 대신 이 구간이 끝나면 NTP가 꺼진 채로 남으므로 cleanup 이
+  반드시 다시 켬 - 이 스위치의 baseline 은 NTP enabled 임(TC-SM-41 도 같은 가정).
 feature: system
 tags: [secfunc, audit, required, secureadmin, console]
 severity: high
@@ -10,28 +18,76 @@ setup:
       - swlog size-trap-threshold 50
       - swlog appid intfni subapp all level debug3
       - swlog output flash-file-size 125
-      # 아래 반복 토글은 swlog 항목을 인위적으로 쌓아 flash-file-size(125) 한도를 넘겨 오버라이팅을 유도하기 위함.
-      # 반복 횟수는 실제 장비의 로그당 용량에 따라 튜닝이 필요할 수 있음.
+  # 아래 반복은 swlog 항목을 인위적으로 쌓아 flash-file-size(125) 한도를 넘겨
+  # 오버라이팅을 유도하기 위함. 반복 횟수는 실제 장비의 로그당 용량에 따라 튜닝이
+  # 필요할 수 있음.
+  #
+  # ignore_errors: 이 구간의 목적은 무언가를 단언하는 게 아니라 로그 부피를 만드는
+  # 것임. 이미 disable 인 상태에서의 재실행을 펌웨어가 거절하더라도 그 거절 자체가
+  # CLI log 에 남으므로 목적은 그대로 달성되며, 여기서 실패로 멈출 이유가 없음.
+  - action: cli
+    ignore_errors: true
+    commands:
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
       - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
+      - ip service ntp admin-state disable
 validations:
   - name: 임계치 반영 (최저 한도 50%)
     type: regex
@@ -51,5 +107,7 @@ cleanup:
       # The debug3 override the setup installs floods the log for every
       # later testcase if it is left behind.
       - swlog appid intfni subapp all level $baseline_swlog_appid_level
+      # setup 의 반복 구간이 NTP를 꺼둔 채로 끝나므로 여기서 되돌림.
+      - ip service ntp admin-state enable
 continue_on_failure: false
 timeout: 180
