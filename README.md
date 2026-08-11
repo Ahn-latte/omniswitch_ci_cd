@@ -55,6 +55,43 @@ Some checks need hardware:
 | `nmap` on `PATH`, **elevated** shell | TC-SM-41B's port scan (`-sS`/`-sU` need raw sockets) |
 | `tshark` + `capture_interface` set | TC-DP-713 (TLS handshake capture) |
 
+## Commissioning a factory-reset switch
+
+Before any of the below can run, the switch needs an address, services and
+accounts. Straight out of a factory reset it has none of those, and no IP
+address either — the serial console is the only way in:
+
+```cmd
+venv\Scripts\python.exe scripts\commission.py
+```
+
+Run it **once**, right after the reset. It is deliberately not idempotent: the
+factory password works exactly once, because AOS forces a policy-compliant
+change before it grants any session at all.
+
+Three things it verifies rather than merely configures, because this is the
+only moment they can be observed:
+
+1. **The password policy is enforced during the forced first change.** Each
+   rule is probed with a violating password inside that dialogue, and the
+   switch's own rejection message is recorded. A switch that accepts a weak
+   password here has a policy that misses the path an installer actually walks.
+2. **The station is reachable** from the switch once addressing is up.
+3. **Nothing is listening** before services are switched on. This runs after
+   addressing but *before* `aaa authentication default local` — that command
+   turns SNMP on, so scanning afterwards would find UDP/161 open and report a
+   finding that isn't one.
+
+It then creates the accounts without `provision:` (the provisioned ones are
+made and removed per-run by `run_secfunc.py`) and saves the configuration —
+the one place saving is right, since commissioning must survive a reboot.
+
+Configured by the `commissioning:` block in `lab.yaml`: factory credentials,
+the password to set (`12#qweASD`, which must match
+`accounts.secureadmin.password`), the management address, and the ports to
+bounce. Add `--skip-scan` if you cannot run elevated; results land in
+`reports/commission.json`.
+
 ## Run
 
 Everything, both repos, in the right order:
@@ -291,6 +328,42 @@ venv\Scripts\switchtest list-devices    # 이 계정들로 생성되는 세션 �
 | 시리얼 콘솔 케이블 (`console.port`) | `secfunc_console.yaml`의 모든 항목, API 저장소의 IP-ban 테스트 |
 | `nmap`이 `PATH`에 있고 **관리자 권한** 셸 | TC-SM-41B의 포트 스캔 (`-sS`/`-sU`는 raw socket 필요) |
 | `tshark` + `capture_interface` 설정 | TC-DP-713 (TLS 핸드셰이크 캡처) |
+
+### 공장 초기화된 스위치 세워 올리기
+
+아래의 어떤 것도 실행하려면 스위치에 주소·서비스·계정이 있어야 합니다. 공장
+초기화 직후에는 그 무엇도 없고 IP 주소조차 없어서, 시리얼 콘솔이 유일한
+진입 경로입니다:
+
+```cmd
+venv\Scripts\python.exe scripts\commission.py
+```
+
+초기화 직후 **한 번만** 실행합니다. 의도적으로 멱등하지 않습니다 — AOS가
+세션을 주기 전에 정책을 만족하는 비밀번호로 바꾸도록 강제하므로, 공장
+비밀번호는 딱 한 번만 유효합니다.
+
+단순 설정이 아니라 **검증**하는 항목이 셋 있습니다. 이 순간에만 관측
+가능하기 때문입니다:
+
+1. **강제 첫 변경 과정에서 비밀번호 정책이 실제로 적용되는지.** 각 규칙을
+   위반하는 비밀번호를 그 대화 안에서 하나씩 시도하고, 스위치가 내놓는 거부
+   메시지를 그대로 기록합니다. 여기서 취약한 비밀번호가 통과한다면, 설치자가
+   실제로 걷는 경로를 정책이 못 지키고 있다는 뜻입니다.
+2. **주소 설정 후 PC와 통신이 되는지** (스위치에서 ping).
+3. **서비스를 켜기 전에는 아무것도 열려 있지 않은지** (포트스캔). 이 검사는
+   주소 설정 뒤, 그러나 `aaa authentication default local` **앞**에 실행합니다 —
+   이 명령이 SNMP를 켜기 때문에, 뒤에서 스캔하면 UDP/161이 열린 것으로 나와
+   발견이 아닌 것을 발견으로 보고하게 됩니다.
+
+그 다음 `provision:`이 없는 계정을 생성하고(있는 계정은 `run_secfunc.py`가 매
+실행 생성·삭제) 설정을 저장합니다. 저장이 옳은 유일한 경우입니다 — 브링업은
+재부팅을 견뎌야 하니까요.
+
+설정은 `lab.yaml`의 `commissioning:` 블록에서 읽습니다: 공장 자격증명, 설정할
+비밀번호(`12#qweASD`, `accounts.secureadmin.password`와 일치해야 함), 관리
+주소, 껐다 켤 포트 범위. 관리자 권한으로 실행할 수 없으면 `--skip-scan`을
+붙이세요. 결과는 `reports/commission.json`에 남습니다.
 
 ### 실행
 

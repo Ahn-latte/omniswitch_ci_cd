@@ -45,6 +45,16 @@ PAGER_PATTERN = re.compile(r"(?i)(--\s*more\s*--|\(\s*more\s*\)|more\s*\?|press 
 # touches configuration leaves behind -- makes AOS ask for confirmation before
 # it lets go of the session. See _logout() for why the answer is always `y`.
 CONFIRM_PATTERN = re.compile(r"(?i)[(\[]\s*y(?:es)?\s*[/|]\s*n(?:o)?\s*[)\]]\s*[:?]?\s*$")
+# A factory-reset switch refuses to hand over a session until the account's
+# password satisfies the policy: it answers the login with "Password policy
+# mismatch, please change password." and then walks a three-prompt dialogue.
+# A rejected new password re-opens the dialogue at "Enter current password:";
+# an accepted one drops the session back to "login:" to be re-authenticated
+# with the new password.
+PASSWORD_CHANGE_REQUIRED_PATTERN = re.compile(r"(?i)password policy mismatch")
+CURRENT_PASSWORD_PROMPT_PATTERN = re.compile(r"(?i)enter current password\s*:\s*$")
+NEW_PASSWORD_PROMPT_PATTERN = re.compile(r"(?i)enter new password\s*:\s*$")
+RETYPE_PASSWORD_PROMPT_PATTERN = re.compile(r"(?i)retype new password\s*:\s*$")
 
 
 @dataclass
@@ -71,7 +81,14 @@ class SerialConsoleTransport:
 
     # -- lifecycle ---------------------------------------------------------
 
-    def connect(self) -> None:
+    def open_port_only(self) -> None:
+        """Open the serial port without logging in.
+
+        `connect()` assumes a switch that can complete an ordinary login. A
+        factory-reset one cannot: it demands a password change first. The
+        commissioning flow opens the port with this and drives the dialogue
+        itself.
+        """
         if pyserial is None:
             detail = f": {SERIAL_IMPORT_ERROR}" if SERIAL_IMPORT_ERROR else ""
             raise ConnectionError(f"pyserial could not be imported{detail}")
@@ -89,6 +106,9 @@ class SerialConsoleTransport:
             raise ConnectionError(
                 f"Failed to open serial console {self.serial_port} at {self.baudrate} baud: {exc}"
             ) from exc
+
+    def connect(self) -> None:
+        self.open_port_only()
         try:
             self._login()
         except Exception:
@@ -183,6 +203,84 @@ class SerialConsoleTransport:
             raise AuthenticationError(
                 f"Console login as '{self.auth_username}' on {self.serial_port} was rejected"
             )
+
+    # -- first login after a factory reset ---------------------------------
+
+    def await_login_prompt(self, timeout: int | None = None) -> str:
+        """Bring the console to its `login:` prompt and return what was read.
+
+        Used by the commissioning flow, which must drive the login itself
+        rather than let `connect()` do it: on a factory-reset switch the
+        password has to be changed before any session exists.
+        """
+        connection = self._require_connection()
+        connection.reset_input_buffer()
+        self._write("")
+        seen = self._read_until(
+            _any_matcher(LOGIN_PROMPT_PATTERN, PASSWORD_PROMPT_PATTERN, self._prompt_pattern),
+            timeout=timeout or self.timeout_socket,
+            expecting="console login prompt",
+        )
+        if self._at_prompt(seen):
+            seen = self._logout(timeout=timeout or self.timeout_socket, stale=True)
+        return seen
+
+    def submit_login(self, username: str, password: str, timeout: int | None = None) -> str:
+        """Send username+password at the login prompt and return the response,
+        without judging it. The caller decides whether landing on a shell
+        prompt, a policy-change dialogue or a rejection is what it wanted."""
+        window = timeout or self.timeout_socket
+        self._write(username)
+        self._read_until(
+            _matcher(PASSWORD_PROMPT_PATTERN),
+            timeout=window,
+            expecting="password prompt",
+        )
+        self._write(password)
+        return self._read_until(
+            _any_matcher(
+                self._prompt_pattern,
+                LOGIN_PROMPT_PATTERN,
+                LOGIN_FAILURE_PATTERN,
+                CURRENT_PASSWORD_PROMPT_PATTERN,
+            ),
+            timeout=window,
+            expecting="login result",
+        )
+
+    def change_password_at_login(
+        self, current_password: str, new_password: str, timeout: int | None = None
+    ) -> tuple[bool, str]:
+        """Walk one pass of the forced change dialogue, already sitting at
+        "Enter current password:".
+
+        Returns ``(accepted, message)``. On rejection the switch prints why and
+        re-opens the dialogue, so the caller can immediately try another
+        password -- which is what makes the policy observable here at all. On
+        acceptance the session returns to `login:` and the caller must
+        authenticate again with the new password.
+        """
+        window = timeout or self.timeout_socket
+        self._write(current_password)
+        self._read_until(
+            _matcher(NEW_PASSWORD_PROMPT_PATTERN),
+            timeout=window,
+            expecting="'Enter new password:'",
+        )
+        self._write(new_password)
+        self._read_until(
+            _matcher(RETYPE_PASSWORD_PROMPT_PATTERN),
+            timeout=window,
+            expecting="'Retype new password:'",
+        )
+        self._write(new_password)
+        result = self._read_until(
+            _any_matcher(CURRENT_PASSWORD_PROMPT_PATTERN, LOGIN_PROMPT_PATTERN, self._prompt_pattern),
+            timeout=window,
+            expecting="result of the password change",
+        )
+        accepted = not CURRENT_PASSWORD_PROMPT_PATTERN.search(_tail(result))
+        return accepted, _change_dialogue_message(result)
 
     def _logout(self, timeout: int, stale: bool = False) -> str:
         """Send `exit` and read back to the login prompt.
@@ -296,6 +394,24 @@ def _decode(chunk: bytes) -> str:
 
 def _tail(text: str, lines: int = 1) -> str:
     return "\n".join(text.split("\n")[-lines:])
+
+
+def _change_dialogue_message(text: str) -> str:
+    """The switch's reason for refusing a new password (or its parting output
+    on success), with the dialogue's own prompts stripped out so the caller
+    reports what the policy said rather than what we typed at it."""
+    noise = (
+        CURRENT_PASSWORD_PROMPT_PATTERN,
+        NEW_PASSWORD_PROMPT_PATTERN,
+        RETYPE_PASSWORD_PROMPT_PATTERN,
+        LOGIN_PROMPT_PATTERN,
+    )
+    lines = [
+        line.strip()
+        for line in text.split("\n")
+        if line.strip() and not any(pattern.search(line.strip()) for pattern in noise)
+    ]
+    return " / ".join(lines) if lines else "(no message)"
 
 
 def _matcher(pattern: re.Pattern[str]):

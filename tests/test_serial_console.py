@@ -238,3 +238,88 @@ def test_stale_session_logout_confirms_too(fake_serial) -> None:
     transport.connect()
 
     assert fake.writes[:4] == ["", "exit", "y", "secureadmin"]
+
+
+# -- forced password change at first login (factory-reset switch) -----------
+#
+# A factory-reset OmniSwitch refuses to open a session until the password
+# satisfies the policy. Rejecting a candidate re-opens the dialogue at "Enter
+# current password:"; accepting one drops back to "login:". scripts/commission.py
+# relies on being able to tell those two apart, which is the whole point of
+# these tests -- the real dialogue only ever happens once per switch.
+
+
+def _factory_transport():
+    return _transport(auth_password="switch")
+
+
+def test_first_login_reports_the_forced_change(fake_serial) -> None:
+    fake = fake_serial(
+        {
+            "": "\r\nlogin: ",
+            "secureadmin": "\r\nPassword: ",
+            "switch": "\r\nPassword policy mismatch, please change password.\r\nEnter current password: ",
+        }
+    )
+    transport = _factory_transport()
+    transport.open_port_only()
+
+    transport.await_login_prompt()
+    response = transport.submit_login("secureadmin", "switch")
+
+    assert "Password policy mismatch" in response
+    assert fake.writes == ["", "secureadmin", "switch"]
+
+
+def test_rejected_new_password_is_reported_with_the_switchs_reason(fake_serial) -> None:
+    fake_serial(
+        {
+            "": "\r\nlogin: ",
+            "secureadmin": "\r\nPassword: ",
+            "switch": [
+                "\r\nPassword policy mismatch, please change password.\r\nEnter current password: ",
+                "\r\nEnter new password: ",
+            ],
+            "12#qweA": "\r\nRetype new password: ",
+        }
+    )
+    transport = _factory_transport()
+    transport.open_port_only()
+    transport.await_login_prompt()
+    transport.submit_login("secureadmin", "switch")
+
+    # The retype is the second write of the same candidate, and the switch
+    # answers it with the rejection plus a fresh dialogue.
+    transport._connection.script["12#qweA"] = [
+        "\r\nRetype new password: ",
+        "\r\nPassword must contain at least 9 characters\r\nEnter current password: ",
+    ]
+    accepted, message = transport.change_password_at_login("switch", "12#qweA")
+
+    assert accepted is False
+    assert "at least 9 characters" in message
+
+
+def test_accepted_new_password_returns_to_the_login_prompt(fake_serial) -> None:
+    fake_serial(
+        {
+            "": "\r\nlogin: ",
+            "secureadmin": "\r\nPassword: ",
+            "switch": [
+                "\r\nPassword policy mismatch, please change password.\r\nEnter current password: ",
+                "\r\nEnter new password: ",
+            ],
+        }
+    )
+    transport = _factory_transport()
+    transport.open_port_only()
+    transport.await_login_prompt()
+    transport.submit_login("secureadmin", "switch")
+
+    transport._connection.script["12#qweASD"] = [
+        "\r\nRetype new password: ",
+        "\r\n\r\nOS6900 login: ",
+    ]
+    accepted, _message = transport.change_password_at_login("switch", "12#qweASD")
+
+    assert accepted is True

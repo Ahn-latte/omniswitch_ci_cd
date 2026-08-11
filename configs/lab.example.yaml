@@ -85,3 +85,23 @@ baseline:
 # 통합 실행을 위한 API/WebView 동반 저장소 경로. 상대 경로는 이 파일이 있는
 # 디렉터리를 기준으로 해석됨.
 api_poc_path: ../../omniswitch_api_poc
+
+# scripts/commission.py 전용. 공장 초기화 직후 스위치를 시리얼 콘솔만으로
+# 세워 올릴 때 쓰는 값들이며, 일반 테스트 실행은 이 블록을 읽지 않음.
+# accounts 와 분리해 둔 이유: 공장 상태에는 secureadmin 하나뿐이고 그 비밀번호도
+# 아직 공장 값이라, 여기 값들은 "아직 lab 계정이 없는 스위치"를 기술함.
+commissioning:
+  # 공장 초기화된 스위치의 계정과 비밀번호. AOS가 세션을 주기 전에 정책을
+  # 만족하는 비밀번호로 바꾸도록 강제하므로, 이 비밀번호는 딱 한 번만 유효함.
+  factory_username: secureadmin
+  factory_password: "switch"
+  # 강제 변경 대화에서 최종적으로 설정할 비밀번호. accounts.secureadmin.password
+  # 와 같아야 이후 테스트 실행이 로그인할 수 있음.
+  initial_password: "12#qweASD"
+  # 콘솔로 설정할 관리 IP. switch.host 와 같은 주소여야 하며, prefix 길이는
+  # host 주소만으로는 알 수 없으므로 여기에 함께 적음.
+  mgmt_interface: v1
+  mgmt_address: 192.168.1.1/24
+  mgmt_vlan: 1
+  # 주소 설정 후 링크를 올리기 위해 껐다 켜는 포트 범위.
+  mgmt_ports: 1/1/1-10

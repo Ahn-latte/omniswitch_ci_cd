@@ -63,6 +63,35 @@ class LabConsole(BaseModel):
     baudrate: int = 115200
 
 
+class LabCommissioning(BaseModel):
+    """What `scripts/commission.py` needs to bring a factory-reset switch up.
+
+    Only that script reads this; a normal test run ignores it entirely. It is
+    separate from `accounts` because these credentials describe a switch that
+    does not yet have the lab's accounts on it -- at factory reset only
+    `secureadmin` exists, and its password is the factory one until the forced
+    change the first login walks through.
+    """
+
+    # The account a factory-reset switch ships with, and the password it ships
+    # with. AOS forces a policy-compliant change before granting a session, so
+    # this password is only ever valid once.
+    factory_username: str = "secureadmin"
+    factory_password: str = "switch"
+    # What that first login changes the password to. Must satisfy the switch's
+    # own policy -- the same policy the change dialogue is used to verify.
+    initial_password: str = "12#qweASD"
+    # Management IP, set over the console so the switch becomes reachable at
+    # `switch.host`. `address` carries the prefix length because the lab file
+    # cannot guess it from the host address alone.
+    mgmt_interface: str = "v1"
+    mgmt_address: str = "192.168.1.1/24"
+    mgmt_vlan: int = 1
+    # Ports bounced to bring links up after addressing. A range is fine
+    # ("1/1/1-10"); it is passed to `interface port <range> admin-state ...`.
+    mgmt_ports: str = "1/1/1-10"
+
+
 class LabBaseline(BaseModel):
     """What every cleanup restores the switch to.
 
@@ -95,6 +124,8 @@ class LabConfig(BaseModel):
     # password policy, which TC-IA-121/122/123 are busy testing.
     test_password: str = "12#qweASD"
     baseline: LabBaseline = Field(default_factory=LabBaseline)
+    # Only `scripts/commission.py` reads this; ordinary runs ignore it.
+    commissioning: LabCommissioning = Field(default_factory=LabCommissioning)
     # Interface name or index that `tshark -D` reports, for the one testcase
     # that captures the switch's TLS ServerHello (TC-DP-713). Machine-specific,
     # so it lives here rather than in the testcase; without it that testcase
