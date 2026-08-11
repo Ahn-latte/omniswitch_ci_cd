@@ -40,7 +40,9 @@ import argparse
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import re
 import sys
+import time
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -259,7 +261,44 @@ def stage_addressing(transport: SerialConsoleTransport, lab: LabConfig) -> Stage
             expected=lab.switch.host,
         )
     )
+
+    # Bouncing the ports does not bring the links up instantly -- the switch
+    # logs "Link 1/1/x operationally up" seconds later -- and until then it has
+    # no route, so anything that touches the network answers "Network is
+    # unreachable". Wait for the interface to actually come up rather than
+    # letting the next stage race it.
+    interfaces, waited = _wait_for_interface_up(transport, lab.switch.host)
+    stage.checks.append(
+        Check(
+            name="관리 인터페이스 UP",
+            passed=_interface_is_up(interfaces, lab.switch.host),
+            observed=f"{_condense(interfaces, lines=6)} (waited {waited}s)",
+            expected=f"{lab.switch.host} UP",
+        )
+    )
     return stage
+
+
+def _interface_is_up(output: str, address: str) -> bool:
+    for line in output.split("\n"):
+        if address in line:
+            return re.search(r"\bUP\b", line, re.IGNORECASE) is not None
+    return False
+
+
+def _wait_for_interface_up(
+    transport: SerialConsoleTransport, address: str, attempts: int = 12, delay: int = 5
+) -> tuple[str, int]:
+    """Poll `show ip interface` until the management address reads UP."""
+    output = ""
+    for attempt in range(attempts):
+        output = transport.send_command("show ip interface", timeout=30)
+        if _interface_is_up(output, address):
+            return output, attempt * delay
+        if attempt < attempts - 1:
+            print(f"  waiting for {address} to come up ({(attempt + 1) * delay}s)...")
+            time.sleep(delay)
+    return output, (attempts - 1) * delay
 
 
 def stage_reachability(transport: SerialConsoleTransport, lab: LabConfig) -> Stage:
@@ -267,19 +306,36 @@ def stage_reachability(transport: SerialConsoleTransport, lab: LabConfig) -> Sta
     this PC because it is the switch's own forwarding path being commissioned,
     and because the console is still the only session we have."""
     stage = Stage(f"스위치 -> PC({lab.station_ip}) 통신 확인")
-    # `-c 3` keeps AOS's ping bounded; an unbounded one runs until Ctrl-C and
+    # `count 3` keeps AOS's ping bounded; an unbounded one runs until Ctrl-C and
     # would never return to the prompt this read waits for.
-    output = transport.send_command(f"ping {lab.station_ip} count 3", timeout=60)
-    lost_everything = "100% packet loss" in output or "0 received" in output
+    #
+    # Retried, because reachability is not up the instant the interface is:
+    # spanning tree still has to let the port forward and ARP still has to
+    # resolve, so the first ping after a link comes up can legitimately answer
+    # "Network is unreachable" on a link that works seconds later.
+    output = ""
+    for attempt in range(6):
+        output = transport.send_command(f"ping {lab.station_ip} count 3", timeout=60)
+        if _ping_succeeded(output):
+            break
+        if attempt < 5:
+            print(f"  ping not through yet, retrying ({(attempt + 1) * 5}s)...")
+            time.sleep(5)
     stage.checks.append(
         Check(
             name="스위치에서 PC로 ping 성공",
-            passed=("bytes from" in output or "0% packet loss" in output) and not lost_everything,
+            passed=_ping_succeeded(output),
             observed=_condense(output, lines=6),
             expected=f"ICMP replies from {lab.station_ip}",
         )
     )
     return stage
+
+
+def _ping_succeeded(output: str) -> bool:
+    if "100% packet loss" in output or "0 received" in output:
+        return False
+    return "bytes from" in output or "0% packet loss" in output
 
 
 def stage_port_scan(lab: LabConfig, arguments: argparse.Namespace) -> Stage:
@@ -455,6 +511,57 @@ def write_report(path: Path, stages: list[Stage], started: str) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+# Ordered, and the order is the point: addressing has to precede reachability,
+# and the scan has to sit between reachability and services (see module docstring).
+STAGES: list[tuple[str, str]] = [
+    ("first-login", "첫 로그인 및 비밀번호 정책 검증"),
+    ("addressing", "관리 IP 설정 및 포트 활성화"),
+    ("reachability", "스위치 -> PC 통신 확인"),
+    ("port-scan", "서비스 활성화 전 포트스캔"),
+    ("services", "인증 설정, 서비스 활성화, 계정 생성"),
+    ("save", "설정 저장"),
+]
+STAGE_SLUGS = [slug for slug, _title in STAGES]
+
+
+def run_stage(slug: str, transport: SerialConsoleTransport, lab: LabConfig, arguments) -> Stage:
+    if slug == "first-login":
+        return stage_first_login(transport, lab)
+    if slug == "addressing":
+        return stage_addressing(transport, lab)
+    if slug == "reachability":
+        return stage_reachability(transport, lab)
+    if slug == "port-scan":
+        return stage_port_scan(lab, arguments)
+    if slug == "services":
+        return stage_services_and_accounts(transport, lab)
+    return stage_save(transport)
+
+
+def sign_in_normally(transport: SerialConsoleTransport, lab: LabConfig) -> str | None:
+    """Log in the ordinary way, for runs that skip `first-login`.
+
+    That stage is what opens the session in a full run. Resuming past it means
+    the password has already been changed, so this logs in with
+    `commissioning.initial_password` instead. Returns an error string, or None
+    when the session is up.
+    """
+    settings = lab.commissioning
+    transport.await_login_prompt(timeout=30)
+    seen = transport.submit_login(settings.factory_username, settings.initial_password, timeout=30)
+    if lab.switch.expected_prompt in seen:
+        return None
+    if "enter current password" in seen.lower():
+        return (
+            "The switch is still demanding the first password change, so the run cannot "
+            "resume past `first-login` -- start from it instead (drop --from-stage)."
+        )
+    return (
+        f"Could not log in as {settings.factory_username} with commissioning.initial_password. "
+        f"The switch said: {_condense(seen)}"
+    )
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--lab", type=Path, default=DEFAULT_LAB_FILE)
@@ -465,41 +572,65 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="skip the port scan (it needs nmap and an elevated shell)",
     )
+    parser.add_argument(
+        "--from-stage",
+        choices=STAGE_SLUGS,
+        default=STAGE_SLUGS[0],
+        help=(
+            "resume from this stage instead of the beginning, for a run that "
+            "already got part way (the first login only works once)"
+        ),
+    )
+    parser.add_argument("--list-stages", action="store_true", help="print the stages and exit")
     return parser.parse_args()
 
 
 def main() -> int:
     arguments = parse_arguments()
+    if arguments.list_stages:
+        for index, (slug, title) in enumerate(STAGES, start=1):
+            print(f"  [{index}] {slug:<14} {title}")
+        return 0
     try:
         lab = load_lab(arguments.lab)
     except LoaderError as exc:
         print(exc, file=sys.stderr)
         return 2
 
+    planned = STAGE_SLUGS[STAGE_SLUGS.index(arguments.from_stage) :]
+    resuming = planned[0] != STAGE_SLUGS[0]
     started = utcnow().isoformat()
     print(
         f"Commissioning {lab.switch.host} over console {lab.console.port}@{lab.console.baudrate}\n"
-        f"  factory account: {lab.commissioning.factory_username}\n"
-        f"  new password:    {lab.commissioning.initial_password}\n"
-        "\nThis is a one-time, non-idempotent run: the factory password works only once."
+        f"  account:      {lab.commissioning.factory_username}\n"
+        f"  new password: {lab.commissioning.initial_password}\n"
+        f"  stages:       {', '.join(planned)}"
+    )
+    print(
+        "\nResuming: logging in with commissioning.initial_password, since the first "
+        "login already happened."
+        if resuming
+        else "\nThis is a one-time, non-idempotent run: the factory password works only once."
     )
 
     transport = open_console(lab)
     stages: list[Stage] = []
     try:
-        for step in (
-            lambda: stage_first_login(transport, lab),
-            lambda: stage_addressing(transport, lab),
-            lambda: stage_reachability(transport, lab),
-            lambda: stage_port_scan(lab, arguments),
-            lambda: stage_services_and_accounts(transport, lab),
-            lambda: stage_save(transport),
-        ):
-            stage = step()
+        if resuming:
+            failure = sign_in_normally(transport, lab)
+            if failure:
+                print(f"\nERROR  {failure}", file=sys.stderr)
+                return 2
+        for slug in planned:
+            stage = run_stage(slug, transport, lab, arguments)
             stages.append(stage)
-            print_stage(len(stages), 6, stage)
+            print_stage(len(stages), len(planned), stage)
             if not stage.ok:
-                print("\nStopping: later stages assume this one succeeded.", file=sys.stderr)
+                print(
+                    f"\nStopping: later stages assume this one succeeded. "
+                    f"Fix it, then resume with --from-stage {slug}",
+                    file=sys.stderr,
+                )
                 break
     finally:
         transport.close()

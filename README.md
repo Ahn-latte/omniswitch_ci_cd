@@ -92,6 +92,20 @@ the password to set (`12#qweASD`, which must match
 bounce. Add `--skip-scan` if you cannot run elevated; results land in
 `reports/commission.json`.
 
+**Resuming a part-finished run.** Because the first login only works once, a
+run that dies at stage 3 cannot simply be started again — stage 1 would find a
+switch that no longer demands a password change. Restart from where it stopped
+instead:
+
+```cmd
+venv\Scripts\python.exe scripts\commission.py --list-stages
+venv\Scripts\python.exe scripts\commission.py --from-stage reachability
+```
+
+Resuming logs in with `commissioning.initial_password` rather than the factory
+one, since by then the password has already been changed. The script prints the
+exact `--from-stage` to use when a stage fails.
+
 ## Run
 
 Everything, both repos, in the right order:
@@ -364,6 +378,19 @@ venv\Scripts\python.exe scripts\commission.py
 비밀번호(`12#qweASD`, `accounts.secureadmin.password`와 일치해야 함), 관리
 주소, 껐다 켤 포트 범위. 관리자 권한으로 실행할 수 없으면 `--skip-scan`을
 붙이세요. 결과는 `reports/commission.json`에 남습니다.
+
+**중간에 멈춘 실행 이어하기.** 첫 로그인은 한 번만 되므로, 3단계에서 죽은
+실행을 그냥 처음부터 다시 돌릴 수는 없습니다 — 1단계가 "비밀번호 변경을
+요구하지 않는 스위치"를 보고 멈춥니다. 멈춘 지점부터 다시 시작하세요:
+
+```cmd
+venv\Scripts\python.exe scripts\commission.py --list-stages
+venv\Scripts\python.exe scripts\commission.py --from-stage reachability
+```
+
+이어할 때는 공장 비밀번호가 아니라 `commissioning.initial_password`로
+로그인합니다. 그 시점엔 이미 비밀번호가 바뀌어 있기 때문입니다. 어떤 단계가
+실패하면 스크립트가 다시 시작할 `--from-stage` 값을 알려줍니다.
 
 ### 실행
 
