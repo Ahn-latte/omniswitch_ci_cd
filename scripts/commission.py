@@ -104,6 +104,21 @@ def open_console(lab: LabConfig) -> SerialConsoleTransport:
     return transport
 
 
+def _reopen_dialogue(transport: SerialConsoleTransport, settings) -> bool:
+    """Log back in to get another go at the forced change dialogue.
+
+    The switch allows three attempts per session and then drops back to
+    `login:`. Since the password is still the factory one -- every attempt so
+    far was refused -- logging in again lands straight back in the dialogue,
+    which is how more than three rules can be probed in one run.
+    """
+    transport.await_login_prompt(timeout=30)
+    response = transport.submit_login(
+        settings.factory_username, settings.factory_password, timeout=30
+    )
+    return "enter current password" in response.lower()
+
+
 def stage_first_login(transport: SerialConsoleTransport, lab: LabConfig) -> Stage:
     """First login: the switch demands a password change, and every rule of the
     policy is probed inside that dialogue before the real password is set."""
@@ -130,8 +145,15 @@ def stage_first_login(transport: SerialConsoleTransport, lab: LabConfig) -> Stag
         )
         return stage
 
+    dialogue_open = True
     for case_id, candidate, expected_fragment in REJECTED_CANDIDATES:
-        accepted, message = transport.change_password_at_login(
+        if not dialogue_open and not _reopen_dialogue(transport, settings):
+            stage.error = (
+                "The change dialogue closed and logging back in did not reopen it. "
+                "Nothing on the switch changed; check the console by hand."
+            )
+            return stage
+        accepted, message, dialogue_open = transport.change_password_at_login(
             settings.factory_password, candidate, timeout=30
         )
         stage.checks.append(
@@ -166,7 +188,13 @@ def stage_first_login(transport: SerialConsoleTransport, lab: LabConfig) -> Stag
             )
             return stage
 
-    accepted, message = transport.change_password_at_login(
+    if not dialogue_open and not _reopen_dialogue(transport, settings):
+        stage.error = (
+            "The change dialogue closed after the last probe and logging back in did "
+            "not reopen it. Nothing on the switch changed; check the console by hand."
+        )
+        return stage
+    accepted, message, _dialogue_open = transport.change_password_at_login(
         settings.factory_password, settings.initial_password, timeout=30
     )
     stage.checks.append(

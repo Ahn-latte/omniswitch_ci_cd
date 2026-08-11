@@ -52,6 +52,13 @@ CONFIRM_PATTERN = re.compile(r"(?i)[(\[]\s*y(?:es)?\s*[/|]\s*n(?:o)?\s*[)\]]\s*[
 # an accepted one drops the session back to "login:" to be re-authenticated
 # with the new password.
 PASSWORD_CHANGE_REQUIRED_PATTERN = re.compile(r"(?i)password policy mismatch")
+# How the switch says no to a new password. Acceptance is decided by the
+# absence of this, NOT by which prompt follows: the dialogue allows three
+# attempts and then drops the session back to `login:`, so a rejection and a
+# success can both end at the login prompt.
+PASSWORD_REJECTION_PATTERN = re.compile(
+    r"(?i)password (?:must|should) |password can ?not be|passwords? do(?:es)? not match"
+)
 CURRENT_PASSWORD_PROMPT_PATTERN = re.compile(r"(?i)enter current password\s*:\s*$")
 NEW_PASSWORD_PROMPT_PATTERN = re.compile(r"(?i)enter new password\s*:\s*$")
 RETYPE_PASSWORD_PROMPT_PATTERN = re.compile(r"(?i)retype new password\s*:\s*$")
@@ -250,15 +257,23 @@ class SerialConsoleTransport:
 
     def change_password_at_login(
         self, current_password: str, new_password: str, timeout: int | None = None
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, bool]:
         """Walk one pass of the forced change dialogue, already sitting at
         "Enter current password:".
 
-        Returns ``(accepted, message)``. On rejection the switch prints why and
-        re-opens the dialogue, so the caller can immediately try another
-        password -- which is what makes the policy observable here at all. On
-        acceptance the session returns to `login:` and the caller must
-        authenticate again with the new password.
+        Returns ``(accepted, message, dialogue_open)``.
+
+        Acceptance is decided by whether the switch printed a policy complaint,
+        not by which prompt came back. The dialogue allows only three attempts:
+        the third rejection prints its reason and then drops the session to
+        `login:`, exactly like a success does. Reading "no 'Enter current
+        password:' at the end" as success therefore reports the third refused
+        password of every run as accepted.
+
+        ``dialogue_open`` says whether another attempt can be made straight
+        away. When it is False the caller must log in again to reopen the
+        dialogue (after a rejection) or to use the new password (after a
+        success).
         """
         window = timeout or self.timeout_socket
         self._write(current_password)
@@ -279,15 +294,12 @@ class SerialConsoleTransport:
             timeout=window,
             expecting="result of the password change",
         )
-        # `rstrip()` rather than reading the last line: the read stops as soon
-        # as the buffer ends with "Enter current password:", but the console
-        # often sends a bare CR right behind the prompt, and whether that CR
-        # lands in the same chunk is pure timing. `\s*$` in the pattern
-        # tolerates it, so matching against the stripped whole is stable --
-        # taking the literal last line saw "" whenever the CR arrived in time
-        # and reported a *rejected* password as accepted.
-        accepted = CURRENT_PASSWORD_PROMPT_PATTERN.search(result.rstrip()) is None
-        return accepted, _change_dialogue_message(result)
+        accepted = PASSWORD_REJECTION_PATTERN.search(result) is None
+        # `rstrip()` rather than the literal last line: the console often sends
+        # a bare CR behind the prompt, and whether it lands in the same read
+        # chunk is pure timing. `\s*$` in the pattern tolerates it.
+        dialogue_open = CURRENT_PASSWORD_PROMPT_PATTERN.search(result.rstrip()) is not None
+        return accepted, _change_dialogue_message(result), dialogue_open
 
     def _logout(self, timeout: int, stale: bool = False) -> str:
         """Send `exit` and read back to the login prompt.

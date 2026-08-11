@@ -294,7 +294,7 @@ def test_rejected_new_password_is_reported_with_the_switchs_reason(fake_serial) 
         "\r\nRetype new password: ",
         "\r\nPassword must contain at least 9 characters\r\nEnter current password: ",
     ]
-    accepted, message = transport.change_password_at_login("switch", "12#qweA")
+    accepted, message, dialogue_open = transport.change_password_at_login("switch", "12#qweA")
 
     assert accepted is False
     assert "at least 9 characters" in message
@@ -320,7 +320,7 @@ def test_accepted_new_password_returns_to_the_login_prompt(fake_serial) -> None:
         "\r\nRetype new password: ",
         "\r\n\r\nOS6900 login: ",
     ]
-    accepted, _message = transport.change_password_at_login("switch", "12#qweASD")
+    accepted, _message, dialogue_open = transport.change_password_at_login("switch", "12#qweASD")
 
     assert accepted is True
 
@@ -352,7 +352,44 @@ def test_rejection_is_detected_even_with_a_trailing_cr(fake_serial) -> None:
         # Note the trailing \r after the prompt -- the whole point of the test.
         "\r\nPassword must contain at least 1 English uppercase character(s).\r\nEnter current password: \r",
     ]
-    accepted, message = transport.change_password_at_login("switch", "12#qweasd")
+    accepted, message, dialogue_open = transport.change_password_at_login("switch", "12#qweasd")
 
     assert accepted is False
     assert "uppercase" in message
+
+
+def test_third_rejection_drops_to_login_and_is_still_a_rejection(fake_serial) -> None:
+    """The dialogue allows three attempts. The third rejection prints its
+    reason and then returns to `login:` -- the same place a success lands.
+
+    Deciding acceptance by "no 'Enter current password:' at the end" therefore
+    called the third refused password of every run accepted, and commissioning
+    aborted claiming a weak password was now live on the switch when the
+    switch had in fact refused it and changed nothing.
+    """
+    fake_serial(
+        {
+            "": "\r\nlogin: ",
+            "secureadmin": "\r\nPassword: ",
+            "switch": [
+                "\r\nPassword policy mismatch, please change password.\r\nEnter current password: ",
+                "\r\nEnter new password: ",
+            ],
+        }
+    )
+    transport = _factory_transport()
+    transport.open_port_only()
+    transport.await_login_prompt()
+    transport.submit_login("secureadmin", "switch")
+
+    transport._connection.script["12#qweasd"] = [
+        "\r\nRetype new password: ",
+        # Third strike: reason, then straight back to the login prompt.
+        "\r\nPassword must contain at least 1 English uppercase character(s).\r\n\r\nOS6900 login: ",
+    ]
+    accepted, message, dialogue_open = transport.change_password_at_login("switch", "12#qweasd")
+
+    assert accepted is False
+    assert "uppercase" in message
+    # The caller must log in again before it can probe another rule.
+    assert dialogue_open is False
