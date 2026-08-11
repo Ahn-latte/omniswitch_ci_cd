@@ -390,6 +390,9 @@ def stage_services_and_accounts(transport: SerialConsoleTransport, lab: LabConfi
     commands = [
         "aaa authentication default local",
         "ip service ssh admin-state enable",
+        # Enabled as `http`, reported by `show ip service` as `https` -- see the
+        # check below. `ip service https admin-state` is deprecated on 8.10 and
+        # answers with an ERROR, so this is the spelling that works.
         "ip service http admin-state enable",
     ]
     for role, account in lab.accounts.items():
@@ -419,7 +422,11 @@ def stage_services_and_accounts(transport: SerialConsoleTransport, lab: LabConfi
         )
 
     services = transport.send_command("show ip service", timeout=30)
-    for service in ("ssh", "http"):
+    # The 443 listener is enabled as `http` but reported as `https`, so the
+    # name to configure and the name to look for are not the same one. Checking
+    # for "http" here found nothing and called a service that was in fact
+    # enabled a failure.
+    for service in ("ssh", "https"):
         stage.checks.append(
             Check(
                 name=f"{service} 활성화",
