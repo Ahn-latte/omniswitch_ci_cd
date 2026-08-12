@@ -267,50 +267,46 @@ def serial_device(lab: LabConfig):
     return None
 
 
-def open_teardown_session(lab: LabConfig):
-    """A session to remove accounts with, over whichever path still works.
+def open_teardown_session(lab: LabConfig, console_ran: bool):
+    """A session to remove accounts with, over a path chosen up front.
 
-    SSH first, to keep `--skip-console` runs working. But teardown runs
-    immediately after the console phase, whose last testcase deliberately bans
-    this host's IP (TC-IA-134) -- and a still-banned switch accepts the TCP
-    connection and then sends no SSH banner, so retrying the network path just
-    burns time and leaves real accounts on a real switch.
+    When the run used the serial cable at all, teardown goes straight down it
+    and never touches the network. That is not a fallback, it is the whole
+    point: teardown follows a phase whose last testcase deliberately bans this
+    host's IP (TC-IA-134), and a still-banned switch accepts the TCP connection
+    and then sends no banner. Trying SSH first means a guaranteed-looking
+    failure, seconds of retries, and a paramiko traceback that reads like a
+    crash -- all to learn something already known.
 
-    The console is out-of-band and demonstrably working at that moment, since
-    the phase that just finished used it. So fall back to it, and while there,
-    release the ban: that is what left the network unusable, and clearing it
-    means the next run does not start against a switch that is still blocking
-    this machine.
+    While on the console, release the ban. That is what made the network
+    unusable, and clearing it keeps the next run from starting against a switch
+    that is still blocking this machine.
+
+    Without a cable (--skip-console, or a lab with no serial account) nothing
+    banned the host in the first place, so SSH is both available and correct.
     """
     from switchtest.drivers.aos import AOSSwitchDriver
 
-    driver = AOSSwitchDriver(lab.devices()["admin"])
-    try:
+    device = serial_device(lab) if console_ran else None
+    if device is None:
+        driver = AOSSwitchDriver(lab.devices()["admin"])
         connect_with_retry(driver, attempts=3)
-        return driver, False
-    except Exception as exc:  # noqa: BLE001 - the fallback is the whole point
-        device = serial_device(lab)
-        if device is None:
-            raise
-        print(
-            f"  SSH is not answering ({exc.__class__.__name__}); the console phase may have "
-            f"left this host banned. Falling back to the serial console."
-        )
-        console_driver = AOSSwitchDriver(device)
-        console_driver.connect()
-        console_driver.apply_config(
-            ["aaa switch-access banned-ip all release"], ignore_errors=True
-        )
-        print("  released any banned IPs over the console")
-        return console_driver, True
+        return driver
+
+    print("  using the serial console (the run banned this host's IP on purpose)")
+    driver = AOSSwitchDriver(device)
+    driver.connect()
+    driver.apply_config(["aaa switch-access banned-ip all release"], ignore_errors=True)
+    print("  released any banned IPs")
+    return driver
 
 
-def manage_accounts(lab: LabConfig, create: bool) -> None:
+def manage_accounts(lab: LabConfig, create: bool, console_ran: bool = False) -> None:
     """Create or delete the provisioned accounts as the admin account.
 
-    Provisioning goes over SSH on purpose: it runs before every phase, and
-    requiring the serial cable to provision would mean --skip-console could not
-    skip anything. Teardown may fall back to the console -- see
+    Provisioning goes over SSH on purpose: it runs before every phase, when the
+    network is known good, and requiring the serial cable to provision would
+    mean --skip-console could not skip anything. Teardown picks its path -- see
     open_teardown_session.
     """
     accounts = provisioned_accounts(lab)
@@ -322,7 +318,7 @@ def manage_accounts(lab: LabConfig, create: bool) -> None:
         driver = AOSSwitchDriver(lab.devices()["admin"])
         connect_with_retry(driver)
     else:
-        driver, _over_console = open_teardown_session(lab)
+        driver = open_teardown_session(lab, console_ran)
     try:
         for username, password, privileges in accounts:
             if create:
@@ -516,7 +512,12 @@ def main() -> int:
         if not arguments.keep_accounts:
             print("\nRemoving provisioned accounts")
             try:
-                manage_accounts(lab, create=False)
+                # Whether the cable was used decides which path teardown takes,
+                # so it is read from the plan rather than discovered by failing.
+                console_ran = any(
+                    step.needs_console for phase in phases for step in phase.steps
+                )
+                manage_accounts(lab, create=False, console_ran=console_ran)
             except Exception as exc:  # noqa: BLE001 - never mask the run's own failure
                 print(f"  could not remove accounts ({exc}); remove them by hand", file=sys.stderr)
 

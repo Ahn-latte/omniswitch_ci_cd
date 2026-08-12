@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Iterator
 import logging
 import platform
+import re
 import socket
 
 from switchtest.exceptions import ConnectionError
@@ -150,18 +151,52 @@ class _ParamikoSocketNoiseFilter(logging.Filter):
     traceback even though the exception is caught and dealt with here. That
     reads like a crash in the middle of a run that is in fact fine.
 
-    Nothing is silenced that the caller is not told about some other way:
-    a banner read that fails is reported by the retry loop ("switch not
+    Suppressing them takes more than matching the message, because paramiko
+    logs a traceback as `util.tb_strings()` -- a *list* of lines -- and its
+    `_log` emits one record per line. Only two of those lines mention the
+    banner; the rest ("Traceback (most recent call last):", the frames,
+    "EOFError") say nothing identifying. So the header record arms
+    suppression for that thread and the traceback-shaped records that follow
+    it are dropped until ordinary logging resumes.
+
+    Nothing is silenced that the caller is not told about some other way: a
+    banner read that fails is reported by the retry loop ("switch not
     reachable yet ..."), and a failure that survives every retry still raises
-    ConnectionError with the host and transport in the message.
+    ConnectionError naming the host and transport.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Keyed by thread: paramiko runs one transport thread per connection,
+        # and a traceback's lines are logged consecutively within it.
+        self._mid_traceback: set[int] = set()
+
     def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage().lower()
-        if platform.system().lower() == "windows" and "socket exception:" in message and "10038" in message:
+        message = record.getMessage()
+        lowered = message.lower()
+        if platform.system().lower() == "windows" and "socket exception:" in lowered and "10038" in lowered:
             return False
         # What a still-banned switch looks like: it accepts the TCP connection
-        # and then closes it without sending a banner.
-        if "error reading ssh protocol banner" in message:
+        # and then closes it without ever sending a banner.
+        if "error reading ssh protocol banner" in lowered:
+            self._mid_traceback.add(record.thread)
             return False
+        if record.thread in self._mid_traceback:
+            if _looks_like_traceback_line(message):
+                return False
+            self._mid_traceback.discard(record.thread)
         return True
+
+
+def _looks_like_traceback_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return True
+    if line.startswith("  "):  # frame and source lines are indented
+        return True
+    if stripped.startswith(
+        ("Traceback (most recent call last)", "During handling of the above exception")
+    ):
+        return True
+    # The final "SomeError: detail" line, dotted module path and all.
+    return re.match(r"^[\w.]+(Error|Exception|Timeout)\b", stripped) is not None
