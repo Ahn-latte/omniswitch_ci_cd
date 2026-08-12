@@ -13,15 +13,68 @@ venv\Scripts\python.exe scripts\run_secfunc.py
 
 ## Install
 
+On a fresh machine, one script builds both virtualenvs and then tells you what
+is still missing:
+
+```cmd
+scripts\setup.bat
+```
+
+Or by hand:
+
 ```cmd
 python -m venv venv
 venv\Scripts\python.exe -m pip install -e .[dev,web]
 venv\Scripts\python.exe -m playwright install chromium
 ```
 
-`[web]` and the Chromium download are needed by the browser-level checks. For
-the port-scan check, `nmap` must be on `PATH`. Nothing else is required —
-SNMPv3 goes through pysnmp, which `pip install` brings in.
+`[web]` and the Chromium download are needed by the browser-level checks.
+Nothing else comes from pip — SNMPv3 goes through pysnmp, which `pip install`
+brings in.
+
+### External tools
+
+Two things are installed outside the repo and must be on `PATH`. Installers
+put them here by default; neither adds itself to `PATH`, so do it yourself
+(admin cmd, then open a new window):
+
+| Tool | Default location | Needed by |
+|---|---|---|
+| nmap | `C:\Program Files (x86)\Nmap` | TC-SM-41B's port scan, commissioning's scan |
+| tshark (Wireshark) | `C:\Program Files\Wireshark` | TC-DP-713 only |
+
+```cmd
+setx /M PATH "%PATH%;C:\Program Files (x86)\Nmap;C:\Program Files\Wireshark"
+```
+
+nmap's `-sS`/`-sU` need raw sockets, so anything that scans must run from an
+**elevated** cmd. Without that nmap cannot determine port state and the
+testcase errors rather than passing.
+
+### Per-machine values
+
+The rest is machine-specific and cannot be pinned by a requirements file — it
+goes in `configs/lab.yaml`, which is gitignored:
+
+| Value | How to find it |
+|---|---|
+| `console.port` | Device Manager, or `check_env.py` lists the ports it can see |
+| `station_ip` | This PC's address as the switch sees it (`ipconfig`) |
+| `capture_interface` | `tshark -D`, take the number facing the switch |
+| `api_poc_path` | Where the companion repo sits, relative to the lab file |
+| account passwords | Your switch's |
+
+### Checking a machine
+
+```cmd
+venv\Scripts\python.exe scripts\check_env.py
+```
+
+It reports every item above with the exact command to fix it, exits non-zero
+when something would stop a run, and marks as WARN the things that only
+disable one testcase. Worth running on a new machine before wondering why a
+phase failed — a missing `capture_interface` or an unelevated shell looks like
+a switch problem in the report, not a setup problem.
 
 ## Configure
 
@@ -300,16 +353,68 @@ venv\Scripts\python.exe scripts\run_secfunc.py
 
 ### 설치
 
+새 머신에서는 스크립트 하나로 두 저장소의 가상환경을 만들고, 아직 빠진 것을
+알려줍니다:
+
+```cmd
+scripts\setup.bat
+```
+
+직접 하려면:
+
 ```cmd
 python -m venv venv
 venv\Scripts\python.exe -m pip install -e .[dev,web]
 venv\Scripts\python.exe -m playwright install chromium
 ```
 
-`[web]`과 Chromium 다운로드는 브라우저 레벨 점검에 필요합니다. 포트 스캔
-점검을 위해서는 `nmap`이 `PATH`에 있어야 합니다. 그 외에는 별도로 필요한
-것이 없습니다 — SNMPv3는 pysnmp를 통해 동작하며, 이는 `pip install` 시
+`[web]`과 Chromium 다운로드는 브라우저 레벨 점검에 필요합니다. pip으로
+받는 건 이게 전부입니다 — SNMPv3는 pysnmp를 통해 동작하며 `pip install` 시
 함께 설치됩니다.
+
+#### 외부 도구
+
+두 가지는 저장소 밖에 설치되며 `PATH`에 있어야 합니다. 설치 프로그램이 기본
+경로에 넣지만 `PATH`에는 스스로 등록하지 않으므로 직접 추가해야 합니다
+(관리자 cmd에서 실행 후 새 창을 여세요):
+
+| 도구 | 기본 설치 경로 | 필요한 곳 |
+|---|---|---|
+| nmap | `C:\Program Files (x86)\Nmap` | TC-SM-41B의 포트 스캔, 커미셔닝의 스캔 |
+| tshark (Wireshark) | `C:\Program Files\Wireshark` | TC-DP-713 전용 |
+
+```cmd
+setx /M PATH "%PATH%;C:\Program Files (x86)\Nmap;C:\Program Files\Wireshark"
+```
+
+nmap의 `-sS`/`-sU`는 raw socket이 필요하므로, 스캔이 포함된 실행은 반드시
+**관리자 권한** cmd에서 해야 합니다. 권한이 없으면 nmap이 포트 상태를
+판별하지 못해 테스트가 통과가 아니라 에러로 끝납니다.
+
+#### 머신마다 다른 값
+
+나머지는 머신에 종속적이라 requirements 파일로 고정할 수 없고,
+gitignore 대상인 `configs/lab.yaml`에 들어갑니다:
+
+| 값 | 확인 방법 |
+|---|---|
+| `console.port` | 장치 관리자, 또는 `check_env.py`가 인식된 포트를 나열해 줌 |
+| `station_ip` | 스위치 입장에서 본 이 PC의 주소 (`ipconfig`) |
+| `capture_interface` | `tshark -D` 실행 후 스위치와 통신하는 인터페이스 번호 |
+| `api_poc_path` | 동반 저장소 위치 (lab 파일 기준 상대 경로) |
+| 계정 비밀번호 | 사용하는 스위치의 값 |
+
+#### 머신 점검
+
+```cmd
+venv\Scripts\python.exe scripts\check_env.py
+```
+
+위 항목들을 하나씩 점검해 고치는 명령까지 알려주고, 실행을 막을 문제가 있으면
+0이 아닌 코드로 종료합니다. 특정 테스트케이스 하나만 못 돌게 하는 항목은
+WARN으로 구분합니다. 새 머신에서는 먼저 돌려보시는 걸 권합니다 —
+`capture_interface` 누락이나 권한 부족은 리포트에서 스위치 문제처럼 보이지,
+설정 문제로 보이지 않습니다.
 
 ### 설정
 
