@@ -11,6 +11,9 @@ switch:
   system_name: OS6900
   expected_firmware: "8.10.86.R04"
   expected_prompt: "->"
+  # TC-FC-312가 테스트용 VLAN에 넣었다 빼는 포트. 섀시마다 포트 번호가
+  # 다르며, 없는 포트를 쓰면 "ERROR: Invalid Port"로 끝남.
+  test_port: 1/1/1
 
 console:
   # 시리얼 콘솔 케이블. 스위치를 네트워크에서 끊어버리는 모든 테스트케이스

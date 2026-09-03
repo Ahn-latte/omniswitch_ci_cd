@@ -393,3 +393,31 @@ def test_third_rejection_drops_to_login_and_is_still_a_rejection(fake_serial) ->
     assert "uppercase" in message
     # The caller must log in again before it can probe another rule.
     assert dialogue_open is False
+
+
+def test_console_output_survives_ansi_cursor_escapes(fake_serial) -> None:
+    """Some chassis redraw a wrapping line by emitting ESC[24;80H between
+    individual characters, so "...identical characters." arrives as
+    "...identical character<ESC>[24;80Hs<ESC>[24;80H.". Left in, every string
+    and regex assertion against console output fails on text that is actually
+    correct.
+    """
+    esc = "\x1b[24;80H"
+    fake_serial(
+        {
+            **LOGIN_SCRIPT,
+            "user tc122 password 12#qqqASD": (
+                "user tc122 password 12#qqqASD\r\n"
+                f"ERROR: Password should not contain three or more consecutive identical character{esc}s{esc}.{esc}\r\n"
+                "ACSW01-> "
+            ),
+        }
+    )
+    transport = _transport()
+    transport.connect()
+
+    output = transport.send_command("user tc122 password 12#qqqASD", timeout=2)
+
+    assert output == (
+        "ERROR: Password should not contain three or more consecutive identical characters."
+    )

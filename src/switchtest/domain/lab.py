@@ -53,6 +53,11 @@ class LabSwitch(BaseModel):
     system_name: str = "OS6900"
     expected_firmware: Optional[str] = None
     expected_prompt: str = "->"
+    # A port the VLAN-tagging testcase can put in a test VLAN and take out
+    # again. Chassis-specific: 1/1/15 exists on an OS6900 and not on every
+    # model, and a port that isn't there fails with 'ERROR: Invalid Port'
+    # rather than anything about VLANs.
+    test_port: str = "1/1/1"
     strict_host_key: bool = False
     connection_timeout: int = 15
     command_timeout: int = 30
@@ -183,6 +188,7 @@ class LabConfig(BaseModel):
             "system_name": self.switch.system_name,
             "station_ip": self.station_ip,
             "test_password": self.test_password,
+            "test_port": self.switch.test_port,
         }
         if self.switch.expected_firmware:
             # Left unsubstituted when unset: an empty `pattern: "$expected_firmware"`

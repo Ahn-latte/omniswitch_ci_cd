@@ -379,7 +379,10 @@ class SerialConsoleTransport:
             chunk = self._read_chunk()
             if not chunk:
                 continue
-            buffer = self._answer_pager(buffer + chunk)
+            # Stripped on the accumulated buffer rather than per chunk: an
+            # escape sequence can be split across reads, and only the whole
+            # buffer is guaranteed to hold it complete.
+            buffer = _strip_ansi(self._answer_pager(buffer + chunk))
             if matcher(buffer):
                 return buffer
         raise ConnectionError(
@@ -405,6 +408,19 @@ class SerialConsoleTransport:
             connection.close()
         except (SerialException, OSError):
             pass
+
+
+# VT100/ANSI control sequences. The console emits cursor-positioning escapes
+# (ESC[24;80H) as it redraws a wrapping line, and on some chassis it does so
+# between *individual characters*, turning "...identical characters." into
+# "...identical character<ESC>[24;80Hs<ESC>[24;80H.". Every string and regex
+# this project matches against console output would otherwise have to tolerate
+# that, so it is removed once, here.
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_PATTERN.sub("", text)
 
 
 def _decode(chunk: bytes) -> str:

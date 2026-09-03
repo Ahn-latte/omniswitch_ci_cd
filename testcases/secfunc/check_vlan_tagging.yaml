@@ -1,6 +1,9 @@
 id: TC-FC-312
 name: IEEE 802.1Q VLAN tagging
-description: VLAN 802.1Q 태깅 기능 (3.1.2)
+description: >-
+  VLAN 802.1Q 태깅 기능 (3.1.2). 대상 포트는 lab.yaml 의 switch.test_port -
+  포트 번호는 섀시마다 다르고, 없는 포트를 쓰면 VLAN 과 무관한
+  "ERROR: Invalid Port" 로 끝나 무엇을 시험한 건지 알 수 없게 됨.
 feature: system
 tags: [secfunc, flow, required]
 severity: high
@@ -8,16 +11,16 @@ setup:
   - action: cli
     commands:
       - vlan 10
-      - vlan 10 members port 1/1/15 tagged
+      - vlan 10 members port $test_port tagged
 validations:
   - name: qtagged 멤버십 확인
     type: contains
-    command: show vlan members port 1/1/15
+    command: show vlan members port $test_port
     expected: "tagged"
 cleanup:
   - action: cli
     commands:
-      - no vlan 10 members port 1/1/15
+      - no vlan 10 members port $test_port
       # The VLAN itself was created by the setup and has to go too.
       - no vlan 10
 continue_on_failure: false
