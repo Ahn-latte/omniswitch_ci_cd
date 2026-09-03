@@ -6,10 +6,14 @@ tags: [secfunc, selftest, required, boot, secureadmin, console]
 severity: high
 setup: []
 validations:
+  # `grep -i ssapp` 은 쓰지 말 것. appMgr 이 이벤트를 보낼 때마다 찍는
+  # "sending event to client /bin/ssapp" 이 전부 걸려서, 자체검사와 무관한
+  # 수천 줄이 115200 시리얼로 쏟아지고 읽기가 타임아웃으로 끝남. 자체검사
+  # 항목은 SSAPP 가 "Checking ..." 으로 남기므로 거기까지 좁혀서 매칭함.
   - name: 부팅 시 SSAPP 자체검사 로그 존재
     type: contains
-    command: show log swlog | grep -i ssapp
-    expected: "SSAPP"
+    command: 'show log swlog | grep -i "SSAPP main INFO: Checking"'
+    expected: 'SSAPP main INFO: Checking'
     timeout: 90
     reauth: true
   - name: CPU 점검 결과 Ok
