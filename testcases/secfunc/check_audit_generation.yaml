@@ -12,13 +12,13 @@ setup:
 validations:
   - name: 인증 성공 기록
     type: regex
-    command: show log swlog | grep -i login
+    command: 'show log swlog | grep -i "Login by"'
     pattern: '(?i)login.*success'
     timeout: 90
     reauth: true
   - name: 인증 실패 기록
     type: regex
-    command: show log swlog | grep -i login
+    command: 'show log swlog | grep -i "Login by"'
     pattern: '(?i)login.*fail'
     timeout: 90
     reauth: true
