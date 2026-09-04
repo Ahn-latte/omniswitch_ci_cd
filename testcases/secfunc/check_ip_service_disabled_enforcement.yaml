@@ -80,9 +80,16 @@ validations:
     type: not_contains
     command: show ip service
     expected: "enabled"
+  # "ip service" 로 넓게 grep 하지 말 것. 이 세션 동안 반복 실행된
+  # TC-AU-811/TC-AU-831 의 ntp 토글(ip service ntp admin-state ...)까지 전부
+  # 걸려서, flash 로그에 누적된 과거 실행분이 115200 시리얼로 통째로 전송되고
+  # 읽기가 타임아웃으로 끝남. "ip service all" 은 이 시험의 setup 이 실행한
+  # `ip service all admin-state disable` 에만 있는 조합이라(다른 서비스 토글은
+  # "ntp"/"ssh"처럼 서비스명이 뒤에 오지 all 이 오지 않음), 이번 실행의 그 한
+  # 줄만 좁혀서 매칭함.
   - name: 감사로그에 비활성화 명령 기록
     type: regex
-    command: show log swlog | grep -i "ip service"
+    command: 'show log swlog | grep -i "ip service all"'
     pattern: 'cmd: ip service all admin-state disable, result: SUCCESS'
     timeout: 90
     reauth: true

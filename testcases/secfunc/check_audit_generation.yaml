@@ -5,10 +5,15 @@ feature: system
 tags: [secfunc, audit, required, secureadmin, console]
 severity: high
 setup:
+  # radius 를 쓰는 이유: ntp 는 TC-AU-831 이 한 실행에서 최대 97회, 다른
+  # testcase 들도 반복 토글하는 가장 혼잡한 서비스라, grep 을 아무리 좁혀도
+  # 이 세션 동안 쌓인 과거 실행분과 계속 부딪힘. radius 는 다른 어떤
+  # testcase 도 admin-state 를 토글하지 않으므로, 이 시험이 방금 낸 두 줄만
+  # 존재함이 세션 이력과 무관하게 보장됨.
   - action: cli
     commands:
-      - ip service ntp admin-state disable
-      - ip service ntp admin-state enable
+      - ip service radius admin-state disable
+      - ip service radius admin-state enable
 validations:
   - name: 인증 성공 기록
     type: regex
@@ -42,8 +47,8 @@ validations:
     reauth: true
   - name: 서비스 활성화/비활성화 기록
     type: regex
-    command: show log swlog | grep -i "ip service"
-    pattern: 'cmd: ip service \w+ admin-state (enable|disable), result: SUCCESS'
+    command: 'show log swlog | grep -i "ip service radius"'
+    pattern: 'cmd: ip service radius admin-state (enable|disable), result: SUCCESS'
     timeout: 90
     reauth: true
 cleanup:
@@ -51,6 +56,6 @@ cleanup:
   # run. This makes the end state true regardless.
   - action: cli
     commands:
-      - ip service ntp admin-state enable
+      - ip service radius admin-state enable
 continue_on_failure: true
 timeout: 180
