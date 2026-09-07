@@ -455,3 +455,141 @@ def test_trap_received_requires_a_target() -> None:
             StubDriver(),
             ValidationStep(name="trap received", type=ValidationType.SNMP_TRAP_RECEIVED),
         )
+
+
+# -- snmp_trap_received triggered by an SNMP SET, not a CLI command ---------
+#
+# TC-SM-43's SET check proves the value took; folding a trap check into that
+# same SET (rather than a second, CLI-triggered testcase like TC-SM-42's
+# admin-disable) answers "does a plain SNMP write also cause a trap" without
+# a second live device round trip.
+
+
+def _fake_snmp_result(ok: bool, value: str | None = None, detail: str = "") -> object:
+    from switchtest.infrastructure.snmp import SnmpResult
+
+    return SnmpResult(ok=ok, value=value, detail=detail)
+
+
+def test_trap_received_via_snmp_set_restores_the_original_value(monkeypatch) -> None:
+    events: list = []
+    trap = ReceivedTrap(source_ip="192.0.2.1", payload=b"\x30\x00", version="v3", username="snmpv3")
+    _install_fake_trap_listener(monkeypatch, events, trap)
+
+    get_calls: list = []
+    set_calls: list = []
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_get",
+        lambda target, port, oid, params, timeout: (
+            get_calls.append((target, port, oid)) or _fake_snmp_result(True, "OS6900")
+        ),
+    )
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_set",
+        lambda target, port, oid, value, params, value_type, timeout: (
+            set_calls.append((oid, value)) or _fake_snmp_result(True, value)
+        ),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="set triggers a trap",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            oid="sysName.0",
+            value="OS6900-SNMPTEST",
+            timeout=5,
+            snmp=SnmpCredentials(user="snmpv3", auth_password="x"),
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+    # The SET happened before the wait (it's the trigger), and the restore
+    # -- a second SET back to the original -- happened after: reading the
+    # original once, writing it twice (the real value, then back).
+    assert [oid for oid, _value in set_calls] == ["sysName.0", "sysName.0"]
+    assert set_calls[0] == ("sysName.0", "OS6900-SNMPTEST")
+    assert set_calls[1] == ("sysName.0", "OS6900")  # restored to what snmp_get read
+
+
+def test_trap_received_via_snmp_set_restores_even_when_no_trap_arrives(monkeypatch) -> None:
+    """The SET is real and changes the device even when the trap never shows
+    up -- restoration must not depend on the trap check having passed."""
+    events: list = []
+    _install_fake_trap_listener(monkeypatch, events, None)
+
+    set_calls: list = []
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_get",
+        lambda target, port, oid, params, timeout: _fake_snmp_result(True, "OS6900"),
+    )
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_set",
+        lambda target, port, oid, value, params, value_type, timeout: (
+            set_calls.append(value) or _fake_snmp_result(True, value)
+        ),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="set triggers a trap",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            oid="sysName.0",
+            value="OS6900-SNMPTEST",
+            timeout=5,
+            snmp=SnmpCredentials(user="snmpv3", auth_password="x"),
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "No trap arrived" in result.message
+    assert "SET of sysName.0 itself succeeded" in result.observed
+    assert set_calls == ["OS6900-SNMPTEST", "OS6900"]  # still restored
+
+
+def test_trap_received_via_snmp_set_failure_skips_the_wait(monkeypatch) -> None:
+    """A rejected SET is a different, more fundamental problem than "no
+    trap" -- it should be reported as such, and there is no point waiting
+    out the full timeout for a trap that a failed write was never going to
+    cause."""
+    events: list = []
+    _install_fake_trap_listener(monkeypatch, events, None)
+
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_get",
+        lambda target, port, oid, params, timeout: _fake_snmp_result(True, "OS6900"),
+    )
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_set",
+        lambda target, port, oid, value, params, value_type, timeout: _fake_snmp_result(
+            False, None, "notWritable"
+        ),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="set triggers a trap",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            oid="sysName.0",
+            value="OS6900-SNMPTEST",
+            timeout=5,
+            snmp=SnmpCredentials(user="snmpv3", auth_password="x"),
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "no trap was even attempted" in result.message
+    # wait_for was never reached -- FakeTrapListener only records "waited" if
+    # it was actually called.
+    assert "waited" not in events

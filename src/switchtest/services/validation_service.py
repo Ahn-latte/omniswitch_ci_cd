@@ -381,24 +381,96 @@ class ValidationService:
         succeeded, but say nothing about whether the switch ever puts a
         packet on the wire.
 
-        Binds the listener *before* running `trigger_commands`, so the
-        provoking action can never race ahead of this process listening for
-        its result.
+        Two ways to provoke the trap, usable together or alone:
+
+        - `trigger_commands`: CLI commands run over the driver's console
+          session (e.g. an admin-disable, for a linkDown trap).
+        - `oid` + `value`: an SNMP SET against `oid`, using the same
+          credentials (`snmp:`) the trap's identity is checked against. This
+          folds "does this SET itself also cause a trap" into the SET's own
+          check instead of needing a second, separate testcase to find out --
+          the original value is read back before the SET and restored after,
+          regardless of whether the trap arrives or the wait raises, so this
+          never leaves the object changed.
+
+        Binds the listener *before* running either trigger, so the provoking
+        action can never race ahead of this process listening for its result.
         """
         target = validation.target or ""
         if not target:
             raise ValidationExecutionError(f"Validation '{validation.name}' requires a target")
-        with TrapListener(validation.trap_port) as listener:
-            if validation.trigger_commands:
-                driver.apply_config(validation.trigger_commands)
-            trap = listener.wait_for(timeout=validation.timeout, expected_source=target)
+
+        port = validation.port or 161
+        oid = validation.oid
+        new_value = validation.value
+        snmp_triggers = oid is not None and new_value is not None
+        params = _snmp_params(validation) if snmp_triggers else None
+        original: SnmpResult | None = None
+        # Deliberately not "did the GET succeed" -- only "did the SET actually
+        # take" means there is something to put back. A rejected SET changed
+        # nothing, and restoring is itself a SET; retrying it after a real
+        # rejection (bad syntax, agent limitation) can fail the same way and
+        # raise from this function's `finally`, burying the SET's own,
+        # more informative failure under a restore error about a value that
+        # was never touched.
+        did_write = False
+
+        try:
+            with TrapListener(validation.trap_port) as listener:
+                if validation.trigger_commands:
+                    driver.apply_config(validation.trigger_commands)
+
+                set_failure: ValidationResult | None = None
+                if snmp_triggers:
+                    assert oid is not None and params is not None
+                    original = snmp_get(target, port, oid, params, timeout=validation.timeout)
+                    if not original.ok:
+                        set_failure = ValidationResult(
+                            name=validation.name,
+                            status=ResultStatus.FAIL,
+                            observed=redact(params, original.detail),
+                            expected=new_value,
+                            message=f"Could not read {oid} before setting it (as user "
+                            f"'{params.user}') -- no trap was even attempted",
+                        )
+                    else:
+                        written = snmp_set(
+                            target, port, oid, new_value, params,
+                            value_type=validation.value_type, timeout=validation.timeout,
+                        )
+                        if not written.ok:
+                            set_failure = ValidationResult(
+                                name=validation.name,
+                                status=ResultStatus.FAIL,
+                                observed=redact(params, written.detail),
+                                expected=new_value,
+                                message=f"SNMP SET of {oid} was rejected for user "
+                                f"'{params.user}' -- no trap was even attempted",
+                            )
+                        else:
+                            did_write = True
+
+                if set_failure is not None:
+                    return set_failure
+
+                trap = listener.wait_for(timeout=validation.timeout, expected_source=target)
+        finally:
+            # Runs even if wait_for raised, or a `return set_failure` fired
+            # above -- a SET that actually changed the switch must be undone
+            # regardless of how this validation ends.
+            if did_write:
+                assert oid is not None and params is not None and original is not None
+                _restore_snmp_value(target, port, oid, original.value or "", params, validation)
 
         expected = f"a trap from {target} within {validation.timeout}s"
         if trap is None:
+            observed = f"no datagram received on UDP/{validation.trap_port} from {target}"
+            if snmp_triggers:
+                observed += f" (the SET of {oid} itself succeeded)"
             return ValidationResult(
                 name=validation.name,
                 status=ResultStatus.FAIL,
-                observed=f"no datagram received on UDP/{validation.trap_port} from {target}",
+                observed=observed,
                 expected=expected,
                 message="No trap arrived -- the station may be configured but nothing is "
                 "actually being sent, or it never reached this host",

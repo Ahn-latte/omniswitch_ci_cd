@@ -10,12 +10,22 @@ description: >-
     1) rw 계정으로 sysName.0 get -> show system 의 Name(OS6900)과 일치
     2) rw 계정으로 sysDescr.0 get -> OS 버전이 장비 엔트리의 expected_firmware와 일치
     3) rw 계정으로 sysName.0 set -> 값이 실제로 바뀌고 다시 읽힘 (원래 값은 자동 복구)
-    4) ro 계정으로 sysName.0 get -> 읽기는 허용 (자격증명 자체는 정상이라는 대조군)
-    5) ro 계정으로 sysName.0 set -> 거부 (notWritable/noAccess)
+    4) rw 계정의 sysName.0 set 이 트랩도 실제로 유발하는지 -> TC-SM-42(admin-disable로
+       유발하는 linkDown)와는 다른 트리거로 같은 것(트랩 배달 경로)을 다시 확인. SET과
+       같은 검증 안에서 처리되므로 값 읽기/쓰기/복구를 또 하지 않음 - snmp_trap_received가
+       리스너를 먼저 바인드하고 그 다음 자기 SET을 실행해 트리거로 씀
+    5) ro 계정으로 sysName.0 get -> 읽기는 허용 (자격증명 자체는 정상이라는 대조군)
+    6) ro 계정으로 sysName.0 set -> 거부 (notWritable/noAccess)
   sysName/sysDescr로 받아온 실제 값은 validation의 observed 필드에 그대로 남으므로
   JSON 리포트에서 시험 시점의 장비 이름과 OS 버전을 확인할 수 있음.
-  set 검증은 원래 값을 먼저 읽어두고 확인 후 되돌리므로, 시험이 sysName을 바꾼 채로
-  끝나지 않음. cleanup의 system name OS6900 은 그 복구가 실패했을 때를 위한 이중 안전장치임.
+  두 set 검증(3, 4) 모두 원래 값을 먼저 읽어두고 확인 후 되돌리므로, 시험이 sysName을
+  바꾼 채로 끝나지 않음. cleanup의 system name OS6900 은 그 복구가 실패했을 때를 위한
+  이중 안전장치임.
+
+  트랩을 받으려면 스위치에 목적지(station)가 등록돼 있어야 함 - TC-SM-42가 만드는 계정과는
+  공유하지 않는 원칙(TC-SM-42와 계정을 공유하지 않음, 아래 참고)과 별개로, station은 이
+  시험이 스스로 만들고 지움. trap_port가 161인 이유와 UDP/161 바인드에 관리자 권한이
+  필요한 이유는 check_snmpv3_account_station.yaml(TC-SM-42) 참고.
 
   준비물: 별도 설치 도구 없음 - SNMP는 pysnmp로 나가며 pip install -e . 로 함께 설치됨
   (cryptography 포함. 없으면 authPriv 요청이 전부 Ciphering services not available 로 실패함).
@@ -39,6 +49,7 @@ setup:
   - action: cli
     ignore_errors: true
     commands:
+      - no snmp station $station_ip
       - no user snmpv3
       - no user snmpv3ro
   - action: cli
@@ -46,6 +57,9 @@ setup:
       - ip service snmp admin-state enable
       - user snmpv3 password $test_password sha256+aes read-write all allow-ssh enable
       - user snmpv3ro password $test_password sha256+aes read-only all allow-ssh enable
+      # 검증 4(SET이 트랩도 유발하는지)의 목적지. TC-SM-42가 같은 명령으로 만드는 것과
+      # 별개 - 이 시험이 스스로 만들고 cleanup에서 스스로 지움.
+      - snmp station $station_ip 161 snmpv3 v3 enable
 validations:
   - name: rw 계정으로 sysName.0 get
     type: snmp_get
@@ -90,6 +104,24 @@ validations:
       auth_protocol: SHA-256
       priv_protocol: AES
       auth_password: "$test_password"
+  # 위 SET과 별개의 SET임 - 리스너를 먼저 바인드해야 트리거보다 앞서 있을 수 있어서,
+  # 이미 지나간 위 SET에 얹어 탈 수는 없음. 원본을 다시 읽고, SET하고, 트랩을 기다리고,
+  # 결과와 무관하게 원래 값으로 복구까지 전부 이 검증 하나 안에서 처리됨.
+  - name: rw 계정의 sysName.0 set이 트랩도 유발함
+    type: snmp_trap_received
+    target: $host
+    port: 161
+    trap_port: 161
+    oid: sysName.0
+    value: "$system_name-SNMPTRAP"
+    value_type: s
+    timeout: 20
+    snmp:
+      user: snmpv3
+      level: authPriv
+      auth_protocol: SHA-256
+      priv_protocol: AES
+      auth_password: "$test_password"
   - name: ro 계정으로 sysName.0 get은 허용 (대조군)
     type: snmp_get
     target: $host
@@ -121,6 +153,7 @@ cleanup:
   - action: cli
     commands:
       - system name $system_name
+      - no snmp station $station_ip
       - no user snmpv3
       - no user snmpv3ro
 continue_on_failure: false

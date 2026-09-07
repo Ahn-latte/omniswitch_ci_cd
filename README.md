@@ -303,7 +303,7 @@ Order matters; the destructive entries are last and must stay there.
 | `TC-IA-124` | Password history prevents reuse of a recent password | global setting |
 | `TC-FC-311` | IP-based ACL policy configuration | swlog |
 | `TC-SM-42` | SNMPv3 account and trap station are created, audited, and a trap actually arrives | swlog + trap |
-| `TC-SM-43` | SNMPv3 get/set works for read-write and is refused for read-only | swlog |
+| `TC-SM-43` | SNMPv3 get/set works for read-write, is refused for read-only, and the SET itself delivers a trap | swlog + trap |
 | `TC-ST-511` | Hardware self-test at boot | swlog |
 | `TC-ST-512` | Process self-test at boot | swlog |
 | `TC-ST-521` | Firmware image integrity check at boot | swlog |
@@ -340,6 +340,19 @@ Order matters; the destructive entries are last and must stay there.
 > turns SNMP on), so on a fresh switch — one `TC-SM-43` hasn't already
 > enabled it on — the trap would silently never leave the switch without
 > this.
+
+> **`TC-SM-43` proves a *second*, independent way to trigger a trap: an
+> ordinary SNMP SET,** not just `TC-SM-42`'s admin-disable. It configures its
+> own trap station (`snmp station $station_ip 161 snmpv3 v3 enable`,
+> separate from `TC-SM-42`'s — the two testcases don't share accounts, and
+> now don't share station config either) and folds the trap check into the
+> existing "does the SET take" validation's own SET, using
+> `snmp_trap_received`'s `oid`+`value` trigger mode instead of
+> `trigger_commands`. Whether an SNMP SET causes a trap at all is not a
+> protocol guarantee the way `linkDown` is — some agents fire a
+> config-change notification on writes, many don't — so this is worth
+> having as a second data point alongside `TC-SM-42`'s, not a replacement
+> for it.
 
 > **Known firmware bug — `TC-AU-811` is expected to fail.** Its "firmware
 > update" check looks for `AOS upgrade or downgrade complete` in swlog, and
@@ -702,7 +715,7 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 | `TC-IA-124` | 비밀번호 이력이 최근 비밀번호 재사용을 방지 | 전역 설정 |
 | `TC-FC-311` | IP 기반 ACL 정책 설정 | swlog |
 | `TC-SM-42` | SNMPv3 계정과 트랩 스테이션 생성, 감사, 트랩 실제 도착까지 확인 | swlog + trap |
-| `TC-SM-43` | SNMPv3 get/set이 읽기/쓰기 계정에서는 동작, 읽기 전용 계정에서는 거부 | swlog |
+| `TC-SM-43` | SNMPv3 get/set이 읽기/쓰기 계정에서는 동작, 읽기 전용 계정에서는 거부, SET 자체가 트랩도 유발함 | swlog + trap |
 | `TC-ST-511` | 부팅 시 하드웨어 자체 테스트 | swlog |
 | `TC-ST-512` | 부팅 시 프로세스 자체 테스트 | swlog |
 | `TC-ST-521` | 부팅 시 펌웨어 이미지 무결성 검사 | swlog |
@@ -739,6 +752,17 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 > `TC-SM-43`(원래 SNMP를 켜는 쪽)보다 먼저 돌기 때문에, `TC-SM-43`이 아직
 > 켜놓지 않은 새 스위치에서는 이게 없으면 트랩이 조용히 스위치 밖으로 나가지
 > 않습니다.
+
+> **`TC-SM-43`은 `TC-SM-42`의 admin-disable과는 별개로, 평범한 SNMP SET
+> 하나로도 트랩을 유발할 수 있는지 두 번째로 확인합니다.** 자기 트랩
+> 스테이션을 스스로 만들고(`snmp station $station_ip 161 snmpv3 v3
+> enable` - `TC-SM-42`와 계정을 공유하지 않듯 station 설정도 따로 만듦),
+> 이미 있던 "SET이 실제로 반영되는지" 검증의 그 SET 자체를
+> `snmp_trap_received`의 `oid`+`value` 트리거 모드로 재사용해서 트랩
+> 확인을 얹었습니다(`trigger_commands` 대신). SNMP SET이 트랩을 유발하는
+> 것은 `linkDown`처럼 프로토콜이 보장하는 동작이 아닙니다 - 설정 변경
+> 알림을 보내는 에이전트도 있고 안 보내는 것도 많습니다 - 그래서 이건
+> `TC-SM-42`를 대체하는 게 아니라 별개의 두 번째 근거로 두는 것입니다.
 
 > **알려진 펌웨어 버그 — `TC-AU-811`은 실패하는 것이 정상입니다.** "펌웨어
 > 업데이트" 검증이 swlog에서 `AOS upgrade or downgrade complete`를 찾는데, 이
