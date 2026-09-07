@@ -50,6 +50,12 @@ setup:
       - no user snmpv3
   - action: cli
     commands:
+      # ip service snmp 없이는 계정/스테이션 생성 자체는 성공하지만(CLI 설정
+      # 명령이라 서비스 상태와 무관), 실제 SNMP 서브시스템(트랩 발신 포함)이
+      # 꺼져 있어 트랩이 나가지 않음. TC-SM-43 은 이걸 자기 setup에서 켜지만
+      # 이 스위트에서 TC-SM-42가 TC-SM-43보다 먼저 돌기 때문에 그 시점엔
+      # 아직 안 켜져 있을 수 있음 - 그래서 여기서도 독립적으로 켬.
+      - ip service snmp admin-state enable
       - user snmpv3 password $test_password sha256+aes read-write all allow-ssh enable
       - snmp station $station_ip 161 snmpv3 v3 enable
 validations:

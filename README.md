@@ -331,6 +331,15 @@ Order matters; the destructive entries are last and must stay there.
 > destination — matching that beats guessing, since changing it would also
 > break the already-audited swlog pattern and `show snmp station` check.
 > If your switch actually sends to 162 instead, change `trap_port` to match.
+>
+> The setup also runs `ip service snmp admin-state enable` itself, not just
+> for `TC-SM-43`. Creating the account and station are plain CLI config
+> commands, so they succeed even with the SNMP service administratively off
+> — but nothing actually gets sent, traps included, while it's off. `TC-SM-42`
+> runs before `TC-SM-43` in this suite (which is the testcase that normally
+> turns SNMP on), so on a fresh switch — one `TC-SM-43` hasn't already
+> enabled it on — the trap would silently never leave the switch without
+> this.
 
 > **Known firmware bug — `TC-AU-811` is expected to fail.** Its "firmware
 > update" check looks for `AOS upgrade or downgrade complete` in swlog, and
@@ -722,6 +731,14 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 > 명시하고 있어서, 그대로 맞춘 것입니다 - 이걸 바꾸면 이미 감사로 검증된
 > swlog 패턴과 `show snmp station` 확인까지 함께 깨집니다. 실제 스위치가
 > 162로 보낸다면 `trap_port`를 그에 맞게 바꾸세요.
+>
+> setup이 `ip service snmp admin-state enable`도 직접 실행합니다 -
+> `TC-SM-43`만을 위한 게 아닙니다. 계정과 스테이션 생성은 순수 CLI 설정
+> 명령이라 SNMP 서비스가 관리적으로 꺼져 있어도 성공하지만, 꺼져 있는 동안은
+> 트랩을 포함해 아무것도 실제로 나가지 않습니다. 이 스위트에서 `TC-SM-42`가
+> `TC-SM-43`(원래 SNMP를 켜는 쪽)보다 먼저 돌기 때문에, `TC-SM-43`이 아직
+> 켜놓지 않은 새 스위치에서는 이게 없으면 트랩이 조용히 스위치 밖으로 나가지
+> 않습니다.
 
 > **알려진 펌웨어 버그 — `TC-AU-811`은 실패하는 것이 정상입니다.** "펌웨어
 > 업데이트" 검증이 swlog에서 `AOS upgrade or downgrade complete`를 찾는데, 이
