@@ -93,10 +93,13 @@ def test_load_snmp_testcase_credentials() -> None:
     assert denial.snmp.user.endswith("ro")
 
 
-def test_service_disable_testcase_scans_the_top_ports() -> None:
+def test_service_disable_testcase_scans_all_ports() -> None:
     testcase = load_testcase(Path("testcases/secfunc/check_ip_service_disabled_enforcement.yaml"))
     scan = next(v for v in testcase.validations if v.type == ValidationType.PORT_SCAN_CLOSED)
-    assert scan.top_ports == 100
+    # Not a --top-ports sample: that skips real ports (2222/tcp, ssh-pkix,
+    # ranks ~366th and is never included even at --top-ports 100), so proving
+    # every service is actually down needs the full 1-65535 sweep.
+    assert scan.all_ports is True
     # One nmap run covers both protocols, so the per-port checks are gone.
     assert not any(v.type == ValidationType.PORT_CLOSED for v in testcase.validations)
     # UDP scanning is slow enough that the default 30s timeout would never do.

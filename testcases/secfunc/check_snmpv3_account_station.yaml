@@ -1,5 +1,5 @@
 id: TC-SM-42
-name: SNMPv3 account and trap station are created and audited
+name: SNMPv3 account and trap station are created, audited, and a trap actually arrives
 description: >-
   시리얼 콘솔의 secureadmin 세션에서 SNMPv3 계정(sha256+aes, read-write)과 SNMP 스테이션을
   생성하고, 두 명령이 감사로그(show log swlog)에 result: SUCCESS 로 기록되는지 검증. 특히
@@ -20,6 +20,21 @@ description: >-
 
   TC-SM-43과 계정을 공유하지 않음 - 각 시험이 자기 계정을 만들고 지우므로 단독으로,
   임의 순서로, 반복 실행해도 안전함.
+
+  마지막 검증(snmp_trap_received)이 이 시험의 핵심임. 위의 감사로그/설정 확인은 전부
+  "스테이션을 만들라는 명령이 성공했다"만 증명하고, 스위치가 그 스테이션으로 실제로 트랩을
+  보내는지는 별개 문제 - 스테이션이 생성만 되고 조용히 아무것도 안 보내도 위 네 검증은 전부
+  통과함. 그래서 이 PC를 실제 트랩 수신자로 세워 놓고, $test_port 를 admin-state disable
+  했다가(cleanup에서 enable로 복구) 그 자체가 유발하는 linkDown 트랩이 UDP/162로 실제
+  도착하는지까지 확인함. linkDown은 IF-MIB 표준 트랩이라 이 계정의 read-write 권한과
+  무관하게 뜨므로, "SNMPv3 트랩 배달 경로 자체"를 검증하는 가장 단순하고 케이블 연결
+  여부에 기대지 않는 트리거임(admin-disable은 물리 링크 유무와 무관하게 ifOperStatus를
+  down으로 만듦). 다른 펌웨어/모델에서 admin-disable이 linkDown 트랩을 내지 않는다면
+  trigger_commands를 다른 이벤트로 바꿀 것.
+
+  UDP/162 바인드는 관리자 권한이 필요함(nmap의 -sS/-sU와 같은 이유). 이 PC에 실제 SNMP
+  트랩 데몬이 이미 떠 있으면 포트 충돌로 이 검증이 바로 에러남 - 그 경우 그 데몬을 잠시
+  내리거나 trap_port를 바꿀 것.
 feature: system
 tags: [secfunc, mgmt, snmp, audit, required, secureadmin, console]
 severity: high
@@ -58,10 +73,27 @@ validations:
     type: contains
     command: show user snmpv3
     expected: "snmpv3"
+  # 위 네 검증은 전부 "설정/감사"이고, 이것만 "동작" 검증임 - 트랩이 실제로 이 PC까지
+  # 옵니다. 리스너를 먼저 바인드하고 그 다음에 trigger_commands를 실행하므로(구현
+  # 순서가 강제됨), 스위치가 명령을 처리하는 속도가 빨라도 트랩을 놓치는 경쟁 상태가
+  # 없음. 대상 소스 IP($host)로 걸러서, 같은 서브넷의 다른 장비가 162로 보내는
+  # 무관한 트래픽에 속지 않음.
+  - name: linkDown 트랩이 실제로 도착함 (admin-disable 트리거)
+    type: snmp_trap_received
+    target: $host
+    trap_port: 162
+    trigger_commands:
+      - interface port $test_port admin-state disable
+    timeout: 30
+    snmp:
+      user: snmpv3
 cleanup:
   - action: cli
     commands:
       - no snmp station $station_ip
       - no user snmpv3
+      # 위 트리거가 내린 포트를 되살림 - 이 시험이 끝난 뒤 $test_port 가 계속 죽어
+      # 있으면 이후 어떤 시험이 그 포트를 쓰든 원인 불명의 실패로 보임.
+      - interface port $test_port admin-state enable
 continue_on_failure: false
-timeout: 300
+timeout: 330

@@ -10,3 +10,5 @@ venv
 *.egg-info/
 .eggs/
 configs/lab.yaml
+# scratch single-testcase suites (see README: TC 하나만 테스트)
+suites/_*.yaml

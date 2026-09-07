@@ -14,7 +14,16 @@ _TLS_VERSION_NAMES = {
     "0x0304": "TLS 1.3",
 }
 
-CAPTURE_DIR = Path("reports") / "captures"
+# Anchored to the package location, not the process's current directory.
+# A bare Path("reports") resolves against whatever directory the caller
+# happened to be in when `switchtest run` was invoked -- fine when
+# run_secfunc.py pins cwd=REPO_ROOT for its subprocess, but a direct
+# `switchtest run` from anywhere else (e.g. a one-off single-testcase suite
+# run from the wrong shell directory) silently wrote the .pcapng under
+# *that* directory's reports/captures instead, so it never showed up where
+# the rest of this repo's reports live.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+CAPTURE_DIR = _REPO_ROOT / "reports" / "captures"
 
 
 def capture_tls_version(interface: str, target: str, port: int, duration: int = 10) -> tuple[str, str, Path]:

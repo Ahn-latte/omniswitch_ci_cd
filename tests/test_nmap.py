@@ -106,6 +106,38 @@ def test_top_ports_scan_builds_the_agreed_command(fake_nmap) -> None:
     ]
 
 
+def test_all_ports_scan_uses_p_dash_instead_of_top_ports(fake_nmap) -> None:
+    """`-p-` is every port 1-65535 for both protocols. This exists because
+    --top-ports is a frequency sample that skips real ports -- e.g. 2222/tcp
+    (ssh-pkix) ranks ~366th and is never included even at --top-ports 100, so
+    a service left listening there is invisible to the sampled scan."""
+    calls, _ = fake_nmap(CLOSED_OUTPUT)
+
+    scan_top_ports("192.168.1.1", all_ports=True)
+
+    assert calls[0] == [
+        "nmap",
+        "-Pn",
+        "-sS",
+        "-sU",
+        "-p-",
+        "-T4",
+        "-v",
+        "--stats-every",
+        "2s",
+        "192.168.1.1",
+    ]
+
+
+def test_all_ports_ignores_top_ports_value(fake_nmap) -> None:
+    calls, _ = fake_nmap(CLOSED_OUTPUT)
+
+    scan_top_ports("192.168.1.1", top_ports=100, all_ports=True)
+
+    assert "--top-ports" not in calls[0]
+    assert "-p-" in calls[0]
+
+
 def test_scan_output_is_streamed_to_the_progress_callback(fake_nmap) -> None:
     fake_nmap(OPEN_OUTPUT)
     seen: list[str] = []
@@ -167,6 +199,19 @@ def test_scan_timeout_explains_the_udp_cost_and_kills_the_child(fake_nmap) -> No
     # An nmap left running would keep scanning the switch after the testcase
     # has moved on.
     assert processes[0].killed
+
+
+def test_all_ports_timeout_message_does_not_suggest_lowering_top_ports(fake_nmap) -> None:
+    """The default advice ("lower top_ports") is nonsensical for an all_ports
+    scan, which ignores top_ports entirely -- it would tell the reader to
+    change a value that has no effect."""
+    fake_nmap(CLOSED_OUTPUT, hangs=True)
+
+    with pytest.raises(ValidationExecutionError) as excinfo:
+        scan_top_ports("192.168.1.1", all_ports=True, timeout=600)
+
+    assert "lower top_ports" not in str(excinfo.value)
+    assert "all 65535" in str(excinfo.value)
 
 
 def test_missing_nmap_is_reported(monkeypatch) -> None:

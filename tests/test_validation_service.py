@@ -1,16 +1,34 @@
 from pathlib import Path
 
+import pytest
+
 import switchtest.services.validation_service as validation_service_module
 from switchtest.domain.enums import ResultStatus, ValidationType
-from switchtest.domain.testcase import ValidationStep
+from switchtest.domain.testcase import SnmpCredentials, ValidationStep
+from switchtest.exceptions import ValidationExecutionError
+from switchtest.infrastructure.trap_listener import ReceivedTrap
 from switchtest.services.validation_service import ValidationService
 
 
 class StubDriver:
+    def __init__(self, events: list | None = None) -> None:
+        # Shared with a FakeTrapListener in the snmp_trap_received tests, so a
+        # test can assert the trigger command really ran *between* the
+        # listener binding and it waiting -- not before the socket was ready,
+        # and not after the wait had already given up.
+        self._events = events
+        self.applied_commands: list[list[str]] = []
+
     def run_show(self, command: str, timeout: int = 30, reauth: bool = False) -> str:
         if command == "show vlan":
             return "VLAN 100 CI_TEST_VLAN100"
         return "Version 1.0"
+
+    def apply_config(self, commands, timeout: int = 30, ignore_errors: bool = False):
+        self.applied_commands.append(list(commands))
+        if self._events is not None:
+            self._events.append("triggered")
+        return list(commands)
 
 
 def test_contains_validator_passes() -> None:
@@ -194,7 +212,7 @@ def test_port_scan_closed_passes_when_nothing_is_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "scan_top_ports",
-        lambda target, top_ports, timeout, on_progress: (
+        lambda target, top_ports, all_ports, timeout, on_progress: (
             [],
             "All 200 scanned ports on 192.0.2.1 are closed",
         ),
@@ -214,7 +232,10 @@ def test_port_scan_closed_names_the_ports_still_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "scan_top_ports",
-        lambda target, top_ports, timeout, on_progress: (["22/tcp open (ssh)"], "22/tcp open ssh"),
+        lambda target, top_ports, all_ports, timeout, on_progress: (
+            ["22/tcp open (ssh)"],
+            "22/tcp open ssh",
+        ),
     )
 
     result = ValidationService().run_validation(
@@ -226,6 +247,32 @@ def test_port_scan_closed_names_the_ports_still_open(monkeypatch) -> None:
 
     assert result.status == ResultStatus.FAIL
     assert "22/tcp open (ssh)" in result.message
+
+
+def test_port_scan_closed_passes_all_ports_through_to_the_scan(monkeypatch) -> None:
+    """`all_ports: true` on the ValidationStep must reach scan_top_ports --
+    otherwise a testcase that asks for a full 1-65535 sweep silently gets the
+    --top-ports sample instead, and no test failure ever points at that."""
+    seen: dict = {}
+
+    def fake_scan(target, top_ports, all_ports, timeout, on_progress):
+        seen["all_ports"] = all_ports
+        return [], "All 131070 scanned ports on 192.0.2.1 are closed"
+
+    monkeypatch.setattr(validation_service_module, "scan_top_ports", fake_scan)
+
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="all ports closed",
+            type=ValidationType.PORT_SCAN_CLOSED,
+            target="192.0.2.1",
+            all_ports=True,
+        ),
+    )
+
+    assert seen["all_ports"] is True
+    assert result.status == ResultStatus.PASS
 
 
 def test_api_unreachable_passes_when_the_request_fails(monkeypatch) -> None:
@@ -267,3 +314,144 @@ def test_api_unreachable_fails_when_the_switch_answers(monkeypatch) -> None:
     )
 
     assert result.status == ResultStatus.FAIL
+
+
+# -- snmp_trap_received -------------------------------------------------------
+#
+# Config-and-audit checks (TC-SM-42's swlog assertions) prove the CLI command
+# that creates a trap station succeeded -- they say nothing about whether the
+# switch ever actually puts a trap packet on the wire. This validation type
+# is the one that listens for it.
+
+
+class FakeTrapListener:
+    """Stands in for TrapListener: records "bound"/"closed" against the same
+    shared `events` list a StubDriver records "triggered" into, so a test can
+    assert the real ordering (bind, then trigger, then wait) rather than just
+    that all three happened somewhere."""
+
+    def __init__(self, events: list, trap) -> None:
+        self._events = events
+        self._trap = trap
+
+    def __enter__(self) -> "FakeTrapListener":
+        self._events.append("bound")
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self._events.append("closed")
+
+    def wait_for(self, timeout, expected_source=None):
+        self._events.append("waited")
+        return self._trap
+
+
+def _install_fake_trap_listener(monkeypatch, events: list, trap):
+    monkeypatch.setattr(
+        validation_service_module,
+        "TrapListener",
+        lambda port: FakeTrapListener(events, trap),
+    )
+
+
+def test_trap_received_passes_and_binds_before_triggering_before_waiting(monkeypatch) -> None:
+    events: list = []
+    trap = ReceivedTrap(
+        source_ip="192.0.2.1", payload=b"\x30\x00", version="v3", username="snmpv3"
+    )
+    _install_fake_trap_listener(monkeypatch, events, trap)
+    driver = StubDriver(events=events)
+
+    result = ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="trap received",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            trap_port=162,
+            trigger_commands=["interface port 1/1/1 admin-state disable"],
+            timeout=30,
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+    assert "192.0.2.1" in result.observed
+    # Order matters: triggering before the socket is bound would let the
+    # switch's trap race ahead of this process listening for it. The socket
+    # closing last, after the wait is done, is just the `with` block ending.
+    assert events == ["bound", "triggered", "waited", "closed"]
+    assert driver.applied_commands == [["interface port 1/1/1 admin-state disable"]]
+
+
+def test_trap_not_received_fails(monkeypatch) -> None:
+    events: list = []
+    _install_fake_trap_listener(monkeypatch, events, None)
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="trap received",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            timeout=5,
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "No trap arrived" in result.message
+
+
+def test_trap_received_from_the_wrong_user_fails(monkeypatch) -> None:
+    """The station could be reachable and even sending traps, but with the
+    wrong SNMPv3 identity -- e.g. a stale user from a previous run. That is
+    also not "the configured account's trap arrived" and must not pass."""
+    events: list = []
+    trap = ReceivedTrap(
+        source_ip="192.0.2.1", payload=b"\x30\x00", version="v3", username="someone-else"
+    )
+    _install_fake_trap_listener(monkeypatch, events, trap)
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="trap received",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            timeout=5,
+            snmp=SnmpCredentials(user="snmpv3", auth_password="x"),
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "someone-else" in result.message
+    assert "snmpv3" in result.message
+
+
+def test_trap_received_without_an_expected_user_does_not_check_identity(monkeypatch) -> None:
+    """No `snmp:` block on the validation means the test only cares that
+    *something* arrived from the target -- identity is opt-in."""
+    events: list = []
+    trap = ReceivedTrap(
+        source_ip="192.0.2.1", payload=b"\x30\x00", version="v3", username="whoever-sent-it"
+    )
+    _install_fake_trap_listener(monkeypatch, events, trap)
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="trap received",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            timeout=5,
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+
+
+def test_trap_received_requires_a_target() -> None:
+    with pytest.raises(ValidationExecutionError, match="target"):
+        ValidationService().run_validation(
+            StubDriver(),
+            ValidationStep(name="trap received", type=ValidationType.SNMP_TRAP_RECEIVED),
+        )

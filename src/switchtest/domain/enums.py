@@ -17,6 +17,7 @@ class ValidationType(str, Enum):
     SNMP_GET = "snmp_get"
     SNMP_SET = "snmp_set"
     SNMP_DENIED = "snmp_denied"
+    SNMP_TRAP_RECEIVED = "snmp_trap_received"
 
 
 class TransportProtocol(str, Enum):

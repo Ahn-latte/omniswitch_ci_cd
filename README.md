@@ -106,7 +106,17 @@ Some checks need hardware:
 |---|---|
 | Serial console cable (`console.port`) | everything in `secfunc_console.yaml`, and the API repo's IP-ban tests |
 | `nmap` on `PATH`, **elevated** shell | TC-SM-41B's port scan (`-sS`/`-sU` need raw sockets) |
+| **Elevated** shell (binds UDP/162) | TC-SM-42's trap-received check — same low-port requirement as nmap, not nmap itself |
 | `tshark` + `capture_interface` set | TC-DP-713 (TLS handshake capture) |
+
+> **TC-SM-41B scans all 65535 TCP and UDP ports, not a sample.** A
+> `--top-ports` sample was tried first and missed a real port: ssh-pkix
+> (2222/tcp) ranks ~366th by nmap's own frequency table, so it's never
+> included even at `--top-ports 1000` — a service left listening there would
+> have passed silently. The full sweep has no such gap, but UDP makes it slow
+> — commonly tens of minutes to a couple of hours depending on how the switch
+> rate-limits ICMP. That's why this testcase's own `timeout` is set to 3600s;
+> raise it further if your switch needs longer.
 
 ## Commissioning a factory-reset switch
 
@@ -199,7 +209,7 @@ the switch:
 | # | Phase | Session | What it does |
 |---|---|---|---|
 | 1 | `password-change` | console → SSH → API → browser | same password-change policy over all four transports, one at a time |
-| 2 | `switch-ssh` | SSH, `admin` | 25 testcases; nothing destructive |
+| 2 | `switch-ssh` | SSH, `admin` | 17 testcases; nothing destructive |
 | 3 | `switch-lowpriv` | SSH, `lowpriv` | audit access restriction |
 | 4 | `api-network` | HTTPS + browser | needs WebView up, so it precedes phase 6 |
 | 5 | `api-console` | HTTPS + console | bans this host's IP, releases it over the console |
@@ -214,6 +224,27 @@ actually changes. Progress is shown per transport as it goes.
 > or with its services off. Recover from the console:
 > `aaa switch-access banned-ip all release` and
 > `ip service ssh admin-state enable`.
+
+### Running one testcase
+
+Neither `switchtest run` nor `run_secfunc.py` take a single testcase directly —
+`--suite` wants a suite file, and `--tag` filters by the `tags:` list, which is
+usually shared by several testcases rather than unique to one. To run exactly
+one, point a suite at it:
+
+```cmd
+echo tests:> suites\_single.yaml
+echo   - ../testcases/secfunc/check_boot_hw_selftest.yaml>> suites\_single.yaml
+venv\Scripts\switchtest run --device secureadmin --suite suites\_single.yaml
+```
+
+`suites/_*.yaml` is gitignored, so a scratch file like this never gets
+committed by accident. Use whichever `--device` that testcase's suite normally
+runs under (`secfunc_console.yaml` → `secureadmin`, `secfunc_all_ssh.yaml` →
+`admin`, `secfunc_lowpriv.yaml` → `lowpriv`) — running one over the wrong
+device fails for a reason that has nothing to do with the testcase itself.
+
+`--dry-run` validates the YAML and touches nothing; drop it to actually run.
 
 ## Testcases
 
@@ -271,7 +302,7 @@ Order matters; the destructive entries are last and must stay there.
 |---|---|---|
 | `TC-IA-124` | Password history prevents reuse of a recent password | global setting |
 | `TC-FC-311` | IP-based ACL policy configuration | swlog |
-| `TC-SM-42` | SNMPv3 account and trap station are created and audited | swlog |
+| `TC-SM-42` | SNMPv3 account and trap station are created, audited, and a trap actually arrives | swlog + trap |
 | `TC-SM-43` | SNMPv3 get/set works for read-write and is refused for read-only | swlog |
 | `TC-ST-511` | Hardware self-test at boot | swlog |
 | `TC-ST-512` | Process self-test at boot | swlog |
@@ -283,6 +314,17 @@ Order matters; the destructive entries are last and must stay there.
 | `TC-IA-133` | SSH lockout actually triggers after 3 failed attempts | locks an account |
 | `TC-SM-41B` | Disabling every IP service actually blocks all network management | kills the network |
 | `TC-IA-134` | SSH IP ban actually triggers at the IP lockout threshold | bans this host |
+
+> **`TC-SM-42`'s last check proves the trap actually arrives, not just that
+> the station was created.** The swlog/config checks above it only prove the
+> *creation command* succeeded — a station that's created and then silently
+> sends nothing would still pass all four of them. So this PC binds UDP/162
+> as a real trap receiver, disables `switch.test_port` (a standard IF-MIB
+> `linkDown` trigger that doesn't depend on anything being physically
+> plugged in), and confirms a trap lands within 30s, authenticated as the
+> `snmpv3` user. Cleanup re-enables the port either way. If your switch/model
+> doesn't emit `linkDown` on an admin-disable, swap `trigger_commands` in
+> `check_snmpv3_account_station.yaml` for an event that does.
 
 > **Known firmware bug — `TC-AU-811` is expected to fail.** Its "firmware
 > update" check looks for `AOS upgrade or downgrade complete` in swlog, and
@@ -315,7 +357,8 @@ slice the same secfunc testcases by requirement section.
 A testcase is `setup` → `validations` → `cleanup`. Validation types:
 `contains`, `not_contains`, `regex`, `equals`, `ping`, `port_closed`,
 `port_scan_closed`, `web_unreachable`, `web_reachable`, `api_unreachable`,
-`tls_version`, `tcp_blocked`, `snmp_get`, `snmp_set`, `snmp_denied`.
+`tls_version`, `tcp_blocked`, `snmp_get`, `snmp_set`, `snmp_denied`,
+`snmp_trap_received`.
 
 Two rules the existing testcases follow:
 
@@ -446,7 +489,17 @@ venv\Scripts\switchtest list-devices    # 이 계정들로 생성되는 세션 �
 |---|---|
 | 시리얼 콘솔 케이블 (`console.port`) | `secfunc_console.yaml`의 모든 항목, API 저장소의 IP-ban 테스트 |
 | `nmap`이 `PATH`에 있고 **관리자 권한** 셸 | TC-SM-41B의 포트 스캔 (`-sS`/`-sU`는 raw socket 필요) |
+| **관리자 권한** 셸 (UDP/162 바인드) | TC-SM-42의 트랩 수신 확인 — nmap과 같은 이유의 저번호 포트 제약이지, nmap 자체는 아님 |
 | `tshark` + `capture_interface` 설정 | TC-DP-713 (TLS 핸드셰이크 캡처) |
+
+> **TC-SM-41B는 표본이 아니라 TCP/UDP 65535개 포트 전체를 스캔합니다.**
+> 원래는 `--top-ports` 표본 방식이었는데 실제 포트를 놓치는 게 확인됐습니다 —
+> ssh-pkix(2222/tcp)는 nmap 자체 빈도 순위로 약 366위라 `--top-ports 1000`을
+> 줘도 절대 포함되지 않아서, 그 서비스가 실제로 열려 있어도 조용히 통과했을
+> 겁니다. 전체 스캔은 그런 사각지대가 없지만 UDP 때문에 느립니다 — 스위치가
+> ICMP를 어떻게 rate limit 하느냐에 따라 보통 수십 분에서 한두 시간까지
+> 걸립니다. 그래서 이 테스트케이스의 `timeout`을 3600초로 잡아뒀고, 그래도
+> 부족하면 더 올리세요.
 
 ### 공장 초기화된 스위치 세워 올리기
 
@@ -537,7 +590,7 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_console.
 | # | 단계 | 세션 | 하는 일 |
 |---|---|---|---|
 | 1 | `password-change` | 콘솔 → SSH → API → 브라우저 | 동일한 비밀번호 변경 정책을 네 가지 전송 방식 모두에서, 하나씩 순서대로 확인 |
-| 2 | `switch-ssh` | SSH, `admin` | 25개 테스트케이스; 파괴적이지 않음 |
+| 2 | `switch-ssh` | SSH, `admin` | 17개 테스트케이스; 파괴적이지 않음 |
 | 3 | `switch-lowpriv` | SSH, `lowpriv` | 감사(audit) 접근 제한 확인 |
 | 4 | `api-network` | HTTPS + 브라우저 | WebView가 떠 있어야 하므로 6단계보다 먼저 실행 |
 | 5 | `api-console` | HTTPS + 콘솔 | 이 호스트의 IP를 차단하고, 콘솔을 통해 해제 |
@@ -553,6 +606,29 @@ venv\Scripts\switchtest run --device secureadmin --suite suites\secfunc_console.
 > 서비스가 꺼진 상태로 남을 수 있습니다. 콘솔에서 복구하세요:
 > `aaa switch-access banned-ip all release` 및
 > `ip service ssh admin-state enable`
+
+#### 테스트케이스 하나만 실행하기
+
+`switchtest run`도 `run_secfunc.py`도 테스트케이스 하나만 직접 지정하는
+옵션은 없습니다 — `--suite`는 스위트 파일을 받고, `--tag`는 `tags:`
+목록으로 거르는데 그 태그는 보통 여러 TC가 함께 씁니다(하나만 고유하게
+집는 경우는 드묾). 정확히 하나만 돌리려면, 그 TC 하나만 담은 스위트를
+만들어 넘기면 됩니다:
+
+```cmd
+echo tests:> suites\_single.yaml
+echo   - ../testcases/secfunc/check_boot_hw_selftest.yaml>> suites\_single.yaml
+venv\Scripts\switchtest run --device secureadmin --suite suites\_single.yaml
+```
+
+`suites/_*.yaml`은 gitignore 대상이라 이런 임시 파일이 실수로 커밋되지
+않습니다. `--device`는 그 TC가 원래 속한 스위트가 쓰는 걸 그대로 쓰세요
+(`secfunc_console.yaml` → `secureadmin`, `secfunc_all_ssh.yaml` → `admin`,
+`secfunc_lowpriv.yaml` → `lowpriv`) — 다른 device로 돌리면 TC 자체와
+무관한 이유로 실패합니다.
+
+`--dry-run`을 붙이면 YAML만 검증하고 아무것도 건드리지 않습니다. 실제로
+돌리려면 빼세요.
 
 ### 테스트케이스
 
@@ -610,7 +686,7 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 |---|---|---|
 | `TC-IA-124` | 비밀번호 이력이 최근 비밀번호 재사용을 방지 | 전역 설정 |
 | `TC-FC-311` | IP 기반 ACL 정책 설정 | swlog |
-| `TC-SM-42` | SNMPv3 계정과 트랩 스테이션 생성 및 감사 | swlog |
+| `TC-SM-42` | SNMPv3 계정과 트랩 스테이션 생성, 감사, 트랩 실제 도착까지 확인 | swlog + trap |
 | `TC-SM-43` | SNMPv3 get/set이 읽기/쓰기 계정에서는 동작, 읽기 전용 계정에서는 거부 | swlog |
 | `TC-ST-511` | 부팅 시 하드웨어 자체 테스트 | swlog |
 | `TC-ST-512` | 부팅 시 프로세스 자체 테스트 | swlog |
@@ -622,6 +698,18 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 | `TC-IA-133` | SSH 잠금이 3회 실패 후 실제로 발동 | 계정을 잠금 |
 | `TC-SM-41B` | 모든 IP 서비스 비활성화 시 실제로 모든 네트워크 관리 차단 | 네트워크 차단 |
 | `TC-IA-134` | SSH IP 차단이 IP 잠금 임계값에서 실제로 발동 | 이 호스트를 차단 |
+
+> **`TC-SM-42`의 마지막 검증은 스테이션이 만들어졌다는 게 아니라 트랩이
+> 실제로 도착하는지를 증명합니다.** 위의 swlog/설정 검증들은 전부 "생성
+> 명령이 성공했다"만 증명하고, 스테이션이 만들어지고도 조용히 아무것도 안
+> 보내면 그 네 검증은 그대로 통과합니다. 그래서 이 PC를 실제 트랩
+> 수신자로 UDP/162에 바인드해두고, `switch.test_port`를 admin-disable
+> 시켜서(물리적으로 뭔가 꽂혀 있어야 할 필요가 없는 표준 IF-MIB
+> `linkDown` 트리거) 30초 안에 `snmpv3` 계정으로 인증된 트랩이 실제로
+> 도착하는지 확인합니다. cleanup은 결과와 무관하게 그 포트를 다시
+> 켭니다. 스위치/모델에 따라 admin-disable이 linkDown을 안 낸다면
+> `check_snmpv3_account_station.yaml`의 `trigger_commands`를 다른
+> 이벤트로 바꾸세요.
 
 > **알려진 펌웨어 버그 — `TC-AU-811`은 실패하는 것이 정상입니다.** "펌웨어
 > 업데이트" 검증이 swlog에서 `AOS upgrade or downgrade complete`를 찾는데, 이
@@ -653,7 +741,8 @@ HTTPS API와 실제 브라우저를 통한 동일한 동작 검증 — 비밀번
 테스트케이스는 `setup` → `validations` → `cleanup` 구조입니다. 검증 타입:
 `contains`, `not_contains`, `regex`, `equals`, `ping`, `port_closed`,
 `port_scan_closed`, `web_unreachable`, `web_reachable`, `api_unreachable`,
-`tls_version`, `tcp_blocked`, `snmp_get`, `snmp_set`, `snmp_denied`.
+`tls_version`, `tcp_blocked`, `snmp_get`, `snmp_set`, `snmp_denied`,
+`snmp_trap_received`.
 
 기존 테스트케이스가 따르는 두 가지 규칙:
 

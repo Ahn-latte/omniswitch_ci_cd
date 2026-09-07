@@ -39,12 +39,14 @@ class NmapProgressRenderer:
     def __init__(
         self,
         target: str,
-        top_ports: int,
+        scope_label: str,
         echo: Callable[[str], None] | None = None,
         interactive: bool | None = None,
     ) -> None:
         self._target = target
-        self._top_ports = top_ports
+        # e.g. "top 100" or "all 65535" -- built by the caller, which is the
+        # only place that knows whether this is a sampled or full-range scan.
+        self._scope_label = scope_label
         self._echo = echo if echo is not None else _echo_without_newline
         # On a terminal every update overwrites the previous one with \r. When
         # output is redirected (CI logs, `> run.txt`) that collapses into one
@@ -55,7 +57,7 @@ class NmapProgressRenderer:
         self._last_bucket: tuple[str, int] | None = None
 
     def __enter__(self) -> "NmapProgressRenderer":
-        self._echo(f"  nmap: scanning top {self._top_ports} tcp+udp ports on {self._target}\n")
+        self._echo(f"  nmap: scanning {self._scope_label} tcp+udp ports on {self._target}\n")
         return self
 
     def __exit__(

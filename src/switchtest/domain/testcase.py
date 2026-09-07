@@ -50,8 +50,17 @@ class ValidationStep(BaseModel):
     port: Optional[int] = None
     protocol: TransportProtocol = TransportProtocol.TCP
     # For port_scan_closed: how many of the most common ports to scan, per
-    # protocol (so 100 means 100 TCP + 100 UDP).
+    # protocol (so 100 means 100 TCP + 100 UDP). Ignored when all_ports is set.
     top_ports: int = 100
+    # For port_scan_closed: scan every TCP/UDP port (1-65535) instead of just
+    # the most common `top_ports`. --top-ports is a frequency sample, not a
+    # port-range guarantee -- it can and does skip real ports (e.g. 2222/tcp,
+    # ssh-pkix on this switch, ranks ~366th and is never included even at
+    # --top-ports 100), so a service left listening on one of those is
+    # invisible to the sampled scan. Full-range UDP is slow (tens of minutes
+    # to hours depending on the target's rate limiting); size `timeout`
+    # accordingly.
+    all_ports: bool = False
     # For api_unreachable: the HTTP path to request. Keep it credential-free --
     # a request to the auth endpoint would count as a login attempt.
     path: str = "/"
@@ -61,6 +70,13 @@ class ValidationStep(BaseModel):
     snmp: Optional[SnmpCredentials] = None
     timeout: int = 30
     reauth: bool = False
+    # For snmp_trap_received: the local UDP port to listen on (this machine is
+    # the trap station, so this is our port, not the switch's).
+    trap_port: int = 162
+    # For snmp_trap_received: CLI commands run over the driver's own session
+    # to provoke the trap, issued only after the listener socket is already
+    # bound -- see TrapListener's docstring for why that order is mandatory.
+    trigger_commands: list[str] = Field(default_factory=list)
 
 
 class TestCaseDefinition(BaseModel):

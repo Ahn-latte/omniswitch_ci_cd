@@ -21,6 +21,7 @@ from switchtest.infrastructure.snmp import (
 )
 from switchtest.infrastructure.tcp_probe import probe_tcp
 from switchtest.infrastructure.tls_capture import capture_tls_version
+from switchtest.infrastructure.trap_listener import TrapListener
 from switchtest.infrastructure.web_probe import check_web_unreachable
 from switchtest.utils.text import normalize_cli_output
 
@@ -46,6 +47,7 @@ class ValidationService:
             ValidationType.SNMP_GET: self._validate_snmp_get,
             ValidationType.SNMP_SET: self._validate_snmp_set,
             ValidationType.SNMP_DENIED: self._validate_snmp_denied,
+            ValidationType.SNMP_TRAP_RECEIVED: self._validate_snmp_trap_received,
         }
         handler = handlers[validation.type]
         if validation.type in _SNMP_VALIDATIONS:
@@ -136,20 +138,28 @@ class ValidationService:
     def _validate_port_scan_closed(
         self, driver: BaseSwitchDriver, validation: ValidationStep
     ) -> ValidationResult:
-        """One scan across the most common TCP and UDP ports; passes when none
-        of them is open. Any port that is open is named in the message, so a
-        failure says which service is still listening.
+        """One scan across TCP and UDP ports; passes when none of them is open.
+        Any port that is open is named in the message, so a failure says which
+        service is still listening.
 
-        This is the one validation that can run for minutes, so it reports its
-        progress to the console while it works."""
-        with NmapProgressRenderer(validation.target or "", validation.top_ports) as progress:
+        `all_ports` switches this from a --top-ports frequency sample to every
+        port 1-65535 -- the sample can and does skip real ports (see
+        ValidationStep.all_ports), so proving *nothing* is listening needs the
+        full sweep. It is much slower, mainly because of UDP.
+
+        This is the one validation that can run for minutes (or, with
+        all_ports, much longer), so it reports its progress to the console
+        while it works."""
+        label = "all 65535" if validation.all_ports else f"top {validation.top_ports}"
+        with NmapProgressRenderer(validation.target or "", label) as progress:
             open_ports, summary = scan_top_ports(
                 validation.target or "",
                 top_ports=validation.top_ports,
+                all_ports=validation.all_ports,
                 timeout=validation.timeout,
                 on_progress=progress.handle_line,
             )
-        scope = f"top {validation.top_ports} tcp and udp ports on {validation.target}"
+        scope = f"{label} tcp and udp ports on {validation.target}"
         return ValidationResult(
             name=validation.name,
             status=ResultStatus.PASS if not open_ports else ResultStatus.FAIL,
@@ -360,6 +370,61 @@ class ValidationService:
             observed=redact(params, result.detail),
             expected=f"{oid} not writable by '{params.user}'",
             message=f"SNMP SET unexpectedly succeeded for read-only user '{params.user}'",
+        )
+
+    def _validate_snmp_trap_received(
+        self, driver: BaseSwitchDriver, validation: ValidationStep
+    ) -> ValidationResult:
+        """Prove a trap actually arrives, not just that the switch is
+        configured to send one -- config-and-audit checks (TC-SM-42's swlog
+        assertions) prove the CLI command that creates the trap station
+        succeeded, but say nothing about whether the switch ever puts a
+        packet on the wire.
+
+        Binds the listener *before* running `trigger_commands`, so the
+        provoking action can never race ahead of this process listening for
+        its result.
+        """
+        target = validation.target or ""
+        if not target:
+            raise ValidationExecutionError(f"Validation '{validation.name}' requires a target")
+        with TrapListener(validation.trap_port) as listener:
+            if validation.trigger_commands:
+                driver.apply_config(validation.trigger_commands)
+            trap = listener.wait_for(timeout=validation.timeout, expected_source=target)
+
+        expected = f"a trap from {target} within {validation.timeout}s"
+        if trap is None:
+            return ValidationResult(
+                name=validation.name,
+                status=ResultStatus.FAIL,
+                observed=f"no datagram received on UDP/{validation.trap_port} from {target}",
+                expected=expected,
+                message="No trap arrived -- the station may be configured but nothing is "
+                "actually being sent, or it never reached this host",
+            )
+
+        observed = f"received from {trap.source_ip}"
+        if trap.version:
+            observed += f", SNMP {trap.version}"
+        if trap.username:
+            observed += f", user '{trap.username}'"
+
+        expected_user = validation.snmp.user if validation.snmp else None
+        if expected_user and trap.username and trap.username != expected_user:
+            return ValidationResult(
+                name=validation.name,
+                status=ResultStatus.FAIL,
+                observed=observed,
+                expected=f"trap authenticated as '{expected_user}'",
+                message=f"A trap arrived but as user '{trap.username}', not '{expected_user}'",
+            )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS,
+            observed=observed,
+            expected=expected,
+            message=None,
         )
 
     def _run_show(self, driver: BaseSwitchDriver, validation: ValidationStep) -> str:

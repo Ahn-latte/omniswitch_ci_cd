@@ -58,16 +58,19 @@ def scan_port(target: str, port: int, timeout: int = 30, protocol: str = "tcp") 
 def scan_top_ports(
     target: str,
     top_ports: int = 100,
+    all_ports: bool = False,
     timeout: int = 600,
     timing: str = "T4",
     on_progress: Callable[[str], None] | None = None,
 ) -> tuple[list[str], str]:
-    """Scan the most common TCP and UDP ports at once; return (open_ports, summary).
+    """Scan TCP and UDP ports at once; return (open_ports, summary).
 
-    Runs `nmap -Pn -sS -sU --top-ports <n> -T4 -v <target>`, i.e. the n most
-    frequently used ports *per protocol* (n TCP + n UDP), and reports which of
-    them came back `open`. `open|filtered` -- what a silent UDP port looks
-    like -- is not counted as open.
+    Runs `nmap -Pn -sS -sU --top-ports <n> -T4 -v <target>` by default, i.e.
+    the n most frequently used ports *per protocol* (n TCP + n UDP). With
+    `all_ports=True` it instead runs `-p-`, every port 1-65535 for both
+    protocols, and `top_ports` is ignored. Either way it reports which ports
+    came back `open`; `open|filtered` -- what a silent UDP port looks like --
+    is not counted as open.
 
     -sS and -sU both need raw sockets, so this must run elevated
     (Administrator on Windows, root on Linux); without that nmap cannot
@@ -79,8 +82,13 @@ def scan_top_ports(
     either, and nmap would then report it as down and skip the scan entirely
     -- which would look like "nothing open" for the wrong reason.
 
-    `--top-ports` is a bounded smoke check, not proof about all 65535 ports.
-    A service parked on an uncommon port is outside what this can see.
+    `--top-ports` is a frequency sample, not a range guarantee: it can and
+    does skip real ports a switch might use (2222/tcp, ssh-pkix here, ranks
+    ~366th by nmap's own frequency table and so is never included even at
+    `--top-ports 100`). `all_ports=True` is what actually proves nothing is
+    listening anywhere; the tradeoff is time -- a full UDP sweep of 65535
+    ports commonly takes tens of minutes to hours depending on how the target
+    rate-limits ICMP, so `timeout` needs to be sized generously for it.
 
     `on_progress` is called with each line of nmap output as it arrives, for
     callers that want to show the scan advancing rather than a silent wait.
@@ -88,13 +96,13 @@ def scan_top_ports(
     """
     if not target:
         raise ValidationExecutionError("Port scan validation requires a target")
+    port_selector = ["-p-"] if all_ports else ["--top-ports", str(top_ports)]
     command = [
         "nmap",
         "-Pn",
         "-sS",
         "-sU",
-        "--top-ports",
-        str(top_ports),
+        *port_selector,
         f"-{timing}",
         "-v",
         # Left on regardless of `on_progress`: unprompted, nmap only reports
@@ -105,20 +113,25 @@ def scan_top_ports(
         "2s",
         target,
     ]
+    label = "all 65535" if all_ports else f"top-{top_ports}"
     try:
         raw_output = _run_streaming(command, timeout=timeout, on_progress=on_progress)
     except subprocess.TimeoutExpired as exc:
+        advice = (
+            "raise the validation timeout, or scan top_ports instead of all_ports"
+            if all_ports
+            else "raise the validation timeout or lower top_ports"
+        )
         raise ValidationExecutionError(
-            f"nmap top-{top_ports} scan of {target} timed out after {timeout} seconds. "
-            f"UDP scanning is bounded by the target's ICMP rate limiting -- raise the "
-            f"validation timeout or lower top_ports."
+            f"nmap {label} scan of {target} timed out after {timeout} seconds. "
+            f"UDP scanning is bounded by the target's ICMP rate limiting -- {advice}."
         ) from exc
     output = raw_output.strip()
     port_lines = _PORT_STATE_RE.findall(output)
     summary_line = _ALL_PORTS_RE.search(output)
     if not port_lines and not summary_line:
         raise ValidationExecutionError(
-            f"Could not parse nmap top-{top_ports} scan of {target} -- an unprivileged "
+            f"Could not parse nmap {label} scan of {target} -- an unprivileged "
             f"shell cannot run -sS/-sU, which looks like this:\n{output}"
         )
     open_ports = [
@@ -126,7 +139,7 @@ def scan_top_ports(
         for port, protocol, state, service in port_lines
         if state == "open"
     ]
-    return open_ports, _summarize(output, top_ports)
+    return open_ports, _summarize(output, label)
 
 
 def _run_streaming(
@@ -183,7 +196,7 @@ def _run_streaming(
     return "".join(lines)
 
 
-def _summarize(output: str, top_ports: int) -> str:
+def _summarize(output: str, label: str) -> str:
     """Keep the port table and the counts, drop nmap's verbose progress noise,
     so a passing result stays readable in the report."""
     kept = [
@@ -193,4 +206,4 @@ def _summarize(output: str, top_ports: int) -> str:
         or _ALL_PORTS_RE.search(line)
         or line.startswith(("Not shown:", "PORT", "Nmap scan report", "Nmap done"))
     ]
-    return "\n".join(kept) or f"nmap scanned the top {top_ports} tcp and udp ports"
+    return "\n".join(kept) or f"nmap scanned the {label} tcp and udp ports"
