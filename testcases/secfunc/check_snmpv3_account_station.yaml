@@ -76,12 +76,20 @@ validations:
   # 위 네 검증은 전부 "설정/감사"이고, 이것만 "동작" 검증임 - 트랩이 실제로 이 PC까지
   # 옵니다. 리스너를 먼저 바인드하고 그 다음에 trigger_commands를 실행하므로(구현
   # 순서가 강제됨), 스위치가 명령을 처리하는 속도가 빨라도 트랩을 놓치는 경쟁 상태가
-  # 없음. 대상 소스 IP($host)로 걸러서, 같은 서브넷의 다른 장비가 162로 보내는
+  # 없음. 대상 소스 IP($host)로 걸러서, 같은 서브넷의 다른 장비가 161로 보내는
   # 무관한 트래픽에 속지 않음.
+  #
+  # trap_port가 표준 162가 아니라 161인 이유: 위 setup의 `snmp station $station_ip
+  # 161 snmpv3 v3 enable` 이 목적지 포트를 161로(GET/SET용 에이전트 포트, 트랩
+  # 표준 포트인 162가 아님) 명시적으로 잡아 놨음. 그 설정을 바꾸면 위의 감사로그
+  # 정규식(줄 59)과 스테이션 확인(줄 68)도 함께 깨지므로, 이미 감사로 검증된 설정
+  # 쪽을 유지하고 리스너를 실제 목적지에 맞춤. 이 스위치가 실제로 161로 보내는지
+  # 162로 보내는지 확실치 않아 시도해보는 값 - 이걸로도 트랩이 안 잡히면 원인은
+  # 포트가 아니라 다른 것(방화벽, notification 미설정, 포트 상태 무변화 등)임.
   - name: linkDown 트랩이 실제로 도착함 (admin-disable 트리거)
     type: snmp_trap_received
     target: $host
-    trap_port: 162
+    trap_port: 161
     trigger_commands:
       - interface port $test_port admin-state disable
     timeout: 30

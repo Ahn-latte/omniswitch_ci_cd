@@ -106,7 +106,7 @@ Some checks need hardware:
 |---|---|
 | Serial console cable (`console.port`) | everything in `secfunc_console.yaml`, and the API repo's IP-ban tests |
 | `nmap` on `PATH`, **elevated** shell | TC-SM-41B's port scan (`-sS`/`-sU` need raw sockets) |
-| **Elevated** shell (binds UDP/162) | TC-SM-42's trap-received check — same low-port requirement as nmap, not nmap itself |
+| **Elevated** shell (binds UDP/161) | TC-SM-42's trap-received check — same low-port requirement as nmap, not nmap itself |
 | `tshark` + `capture_interface` set | TC-DP-713 (TLS handshake capture) |
 
 > **TC-SM-41B scans all 65535 TCP and UDP ports, not a sample.** A
@@ -318,13 +318,19 @@ Order matters; the destructive entries are last and must stay there.
 > **`TC-SM-42`'s last check proves the trap actually arrives, not just that
 > the station was created.** The swlog/config checks above it only prove the
 > *creation command* succeeded — a station that's created and then silently
-> sends nothing would still pass all four of them. So this PC binds UDP/162
+> sends nothing would still pass all four of them. So this PC binds UDP/161
 > as a real trap receiver, disables `switch.test_port` (a standard IF-MIB
 > `linkDown` trigger that doesn't depend on anything being physically
 > plugged in), and confirms a trap lands within 30s, authenticated as the
 > `snmpv3` user. Cleanup re-enables the port either way. If your switch/model
 > doesn't emit `linkDown` on an admin-disable, swap `trigger_commands` in
 > `check_snmpv3_account_station.yaml` for an event that does.
+>
+> `trap_port` is 161, not the standard trap port 162, because the setup's
+> `snmp station $station_ip 161 snmpv3 v3 enable` names 161 as the
+> destination — matching that beats guessing, since changing it would also
+> break the already-audited swlog pattern and `show snmp station` check.
+> If your switch actually sends to 162 instead, change `trap_port` to match.
 
 > **Known firmware bug — `TC-AU-811` is expected to fail.** Its "firmware
 > update" check looks for `AOS upgrade or downgrade complete` in swlog, and
@@ -489,7 +495,7 @@ venv\Scripts\switchtest list-devices    # 이 계정들로 생성되는 세션 �
 |---|---|
 | 시리얼 콘솔 케이블 (`console.port`) | `secfunc_console.yaml`의 모든 항목, API 저장소의 IP-ban 테스트 |
 | `nmap`이 `PATH`에 있고 **관리자 권한** 셸 | TC-SM-41B의 포트 스캔 (`-sS`/`-sU`는 raw socket 필요) |
-| **관리자 권한** 셸 (UDP/162 바인드) | TC-SM-42의 트랩 수신 확인 — nmap과 같은 이유의 저번호 포트 제약이지, nmap 자체는 아님 |
+| **관리자 권한** 셸 (UDP/161 바인드) | TC-SM-42의 트랩 수신 확인 — nmap과 같은 이유의 저번호 포트 제약이지, nmap 자체는 아님 |
 | `tshark` + `capture_interface` 설정 | TC-DP-713 (TLS 핸드셰이크 캡처) |
 
 > **TC-SM-41B는 표본이 아니라 TCP/UDP 65535개 포트 전체를 스캔합니다.**
@@ -703,13 +709,19 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 > 실제로 도착하는지를 증명합니다.** 위의 swlog/설정 검증들은 전부 "생성
 > 명령이 성공했다"만 증명하고, 스테이션이 만들어지고도 조용히 아무것도 안
 > 보내면 그 네 검증은 그대로 통과합니다. 그래서 이 PC를 실제 트랩
-> 수신자로 UDP/162에 바인드해두고, `switch.test_port`를 admin-disable
+> 수신자로 UDP/161에 바인드해두고, `switch.test_port`를 admin-disable
 > 시켜서(물리적으로 뭔가 꽂혀 있어야 할 필요가 없는 표준 IF-MIB
 > `linkDown` 트리거) 30초 안에 `snmpv3` 계정으로 인증된 트랩이 실제로
 > 도착하는지 확인합니다. cleanup은 결과와 무관하게 그 포트를 다시
 > 켭니다. 스위치/모델에 따라 admin-disable이 linkDown을 안 낸다면
 > `check_snmpv3_account_station.yaml`의 `trigger_commands`를 다른
 > 이벤트로 바꾸세요.
+>
+> `trap_port`가 표준 트랩 포트인 162가 아니라 161인 이유: setup의
+> `snmp station $station_ip 161 snmpv3 v3 enable`이 목적지를 161로
+> 명시하고 있어서, 그대로 맞춘 것입니다 - 이걸 바꾸면 이미 감사로 검증된
+> swlog 패턴과 `show snmp station` 확인까지 함께 깨집니다. 실제 스위치가
+> 162로 보낸다면 `trap_port`를 그에 맞게 바꾸세요.
 
 > **알려진 펌웨어 버그 — `TC-AU-811`은 실패하는 것이 정상입니다.** "펌웨어
 > 업데이트" 검증이 swlog에서 `AOS upgrade or downgrade complete`를 찾는데, 이
