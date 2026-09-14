@@ -1,0 +1,28 @@
+id: TC-DP-716B
+name: WebView refuses a TLS 1.1-only handshake
+description: >-
+  TC-DP-716(설정값)/TC-DP-713(정상 협상 캡처)의 반대편 - "1.2 이상만 허용"은 낮은 버전을
+  실제로 거부해야 증명됨. Firefox를 TLS 1.1로만(min=max=TLS1.1) 제한해 WebView(443)에
+  접속을 시도하고, 핸드셰이크 자체가 실패하는지 확인.
+
+  Chromium이 아니라 Firefox: Chromium은 최대 TLS 버전을 강제하는 기능을 오래전에
+  제거해서, 뭘 요청하든 서버가 지원하는 최고 버전으로 그냥 협상해버림 - 아무것도
+  증명하지 못함. Firefox는 여전히 security.tls.version.min/max를 launch 시점의
+  firefox_user_prefs로 줄 수 있어서, 실제로 다운그레이드된 핸드셰이크를 "시도하고
+  실패"할 수 있는 유일한 브라우저.
+
+  playwright install firefox 가 필요함(chromium과 별개로 설치해야 함).
+feature: system
+tags: [secfunc, transport, network, tls]
+severity: high
+setup: []
+validations:
+  - name: TLS 1.1로 제한된 Firefox의 WebView 접속이 실패함
+    type: web_tls_restricted_unreachable
+    target: $host
+    port: 443
+    tls_version: "1.1"
+    timeout: 20
+cleanup: []
+continue_on_failure: false
+timeout: 60

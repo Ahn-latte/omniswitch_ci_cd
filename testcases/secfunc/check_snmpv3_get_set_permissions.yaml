@@ -10,10 +10,14 @@ description: >-
     1) rw 계정으로 sysName.0 get -> show system 의 Name(OS6900)과 일치
     2) rw 계정으로 sysDescr.0 get -> OS 버전이 장비 엔트리의 expected_firmware와 일치
     3) rw 계정으로 sysName.0 set -> 값이 실제로 바뀌고 다시 읽힘 (원래 값은 자동 복구)
-    4) rw 계정의 sysName.0 set 이 트랩도 실제로 유발하는지 -> TC-SM-42(admin-disable로
-       유발하는 linkDown)와는 다른 트리거로 같은 것(트랩 배달 경로)을 다시 확인. SET과
-       같은 검증 안에서 처리되므로 값 읽기/쓰기/복구를 또 하지 않음 - snmp_trap_received가
-       리스너를 먼저 바인드하고 그 다음 자기 SET을 실행해 트리거로 씀
+    4) 일부러 틀린 비밀번호로 sysName.0 get을 시도해 SNMPv3 인증 실패를 유발하고, 그게
+       실제로 트랩까지 유발하는지 -> TC-SM-42(admin-disable로 유발하는 linkDown)와는
+       다른 트리거로 같은 것(트랩 배달 경로)을 다시 확인. 원래는 SET을 트리거로 썼으나,
+       스테이션 IP를 정확히 맞춘 뒤 tshark로 직접 캡처해 확인한 결과 이 스위치/펌웨어는
+       SNMP SET에 대해 트랩을 전혀 안 보냄 - authenticationFailure는 SNMPv2-MIB 표준
+       트랩이라 벤더 구현 여부와 무관하게 더 신뢰할 수 있어 이걸로 바꿈. GET이라 읽기/
+       쓰기/복구가 필요 없고, 인증 실패는 CLI/SSH 로그인 실패와 다른 메커니즘이라(AAA
+       lockout-threshold, TC-IA-131/133과 무관) 계정이 잠길 위험도 없음
     5) ro 계정으로 sysName.0 get -> 읽기는 허용 (자격증명 자체는 정상이라는 대조군)
     6) ro 계정으로 sysName.0 set -> 거부 (notWritable/noAccess)
   sysName/sysDescr로 받아온 실제 값은 validation의 observed 필드에 그대로 남으므로
@@ -57,8 +61,8 @@ setup:
       - ip service snmp admin-state enable
       - user snmpv3 password $test_password sha256+aes read-write all allow-ssh enable
       - user snmpv3ro password $test_password sha256+aes read-only all allow-ssh enable
-      # 검증 4(SET이 트랩도 유발하는지)의 목적지. TC-SM-42가 같은 명령으로 만드는 것과
-      # 별개 - 이 시험이 스스로 만들고 cleanup에서 스스로 지움.
+      # 검증 4(인증 실패가 트랩도 유발하는지)의 목적지. TC-SM-42가 같은 명령으로
+      # 만드는 것과 별개 - 이 시험이 스스로 만들고 cleanup에서 스스로 지움.
       - snmp station $station_ip 161 snmpv3 v3 enable
 validations:
   - name: rw 계정으로 sysName.0 get
@@ -104,17 +108,17 @@ validations:
       auth_protocol: SHA-256
       priv_protocol: AES
       auth_password: "$test_password"
-  # 위 SET과 별개의 SET임 - 리스너를 먼저 바인드해야 트리거보다 앞서 있을 수 있어서,
-  # 이미 지나간 위 SET에 얹어 탈 수는 없음. 원본을 다시 읽고, SET하고, 트랩을 기다리고,
-  # 결과와 무관하게 원래 값으로 복구까지 전부 이 검증 하나 안에서 처리됨.
-  - name: rw 계정의 sysName.0 set이 트랩도 유발함
+  # bad_auth_password로 GET을 보내면 그 요청 자체는 snmp.auth_password(진짜 비밀번호)가
+  # 아니라 bad_auth_password로 나가므로, snmpv3 계정의 실제 비밀번호는 여기서 전혀
+  # 쓰이지 않고 노출되지도 않음 - 실패가 목적이라 GET 자체가 거부되는 게 정상(통과 조건).
+  # 리스너를 먼저 바인드한 뒤 그 GET을 트리거로 실행하므로 순서가 보장됨.
+  - name: SNMPv3 인증 실패가 트랩을 유발함
     type: snmp_trap_received
     target: $host
     port: 161
     trap_port: 161
     oid: sysName.0
-    value: "$system_name-SNMPTRAP"
-    value_type: s
+    bad_auth_password: "definitely-wrong-password-000"
     timeout: 20
     snmp:
       user: snmpv3

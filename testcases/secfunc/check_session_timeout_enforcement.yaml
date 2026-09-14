@@ -1,0 +1,48 @@
+id: TC-SM-461B
+name: CLI inactivity timeout actually disconnects an idle SSH session
+description: >-
+  TC-SM-461(설정값만 확인 - show session config에 Cli Inactivity Timer가 30으로 찍히는지)의
+  behavioral 버전. session cli timeout 1(분)로 걸어두고, 그 값이 실제로 세션을 끊는지
+  직접 확인함 - 설정이 반영됐다고 실제로 동작한다는 보장은 없음.
+
+  이 시험 전용 계정(sessiontest)으로 별도 SSH 세션을 새로 열고(드라이버 자신의 세션이
+  아님), 살아있는지 한 번 확인한 뒤 idle_seconds(기본 75초, 1분 타임아웃보다 여유를 둠)
+  동안 아무것도 안 보내고 기다렸다가 명령을 하나 더 보냄. 그 시점에 세션이 이미 끊겨
+  있어야 통과 - 여전히 응답하면 타임아웃이 설정만 됐지 실제로는 적용 안 되고 있다는 뜻.
+
+  전용 계정을 쓰는 이유: AOS는 계정당 트랜스포트를 불문하고 세션을 하나만 허용하므로,
+  이 시험을 돌리는 --device 계정(보통 secureadmin, 콘솔)과 겹치지 않는 별도 계정이
+  필요함. TC-SM-42/43이 자기 계정을 만들고 지우는 것과 같은 이유.
+
+  session cli timeout이 콘솔/텔넷/SSH CLI 세션을 함께 관장한다고 보고 SSH로만
+  검증함(WebView/API의 HTTP 세션은 session http timeout이 별도로 관장 - WebView는
+  화면 하단 UI에 자체 타임아웃 설정이 있어 omniswitch_api_poc의 Playwright 시험이 따로
+  확인함). 이 스위치에서 실제로 그렇지 않다고 판명되면 이 가정을 재검토할 것.
+feature: system
+tags: [secfunc, mgmt, required]
+severity: high
+setup:
+  - action: cli
+    ignore_errors: true
+    commands:
+      - no user sessiontest
+  - action: cli
+    commands:
+      - user sessiontest password $test_password read-write all allow-ssh enable
+      - session cli timeout 1
+validations:
+  - name: 1분 유휴 후 SSH 세션이 끊김
+    type: ssh_session_expires
+    target: $host
+    port: 22
+    session_username: sessiontest
+    session_password: $test_password
+    idle_seconds: 75
+    timeout: 15
+cleanup:
+  - action: cli
+    commands:
+      - session cli timeout $baseline_session_timeout
+      - no user sessiontest
+continue_on_failure: false
+timeout: 180

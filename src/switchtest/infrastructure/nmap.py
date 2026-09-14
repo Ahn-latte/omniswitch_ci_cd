@@ -61,16 +61,21 @@ def scan_top_ports(
     all_ports: bool = False,
     timeout: int = 600,
     timing: str = "T4",
+    min_rate: int = 1000,
+    max_retries: int = 1,
     on_progress: Callable[[str], None] | None = None,
 ) -> tuple[list[str], str]:
     """Scan TCP and UDP ports at once; return (open_ports, summary).
 
-    Runs `nmap -Pn -sS -sU --top-ports <n> -T4 -v <target>` by default, i.e.
-    the n most frequently used ports *per protocol* (n TCP + n UDP). With
+    Runs `nmap -Pn -sS -sU --top-ports <n> -T4 --min-rate <r> --max-retries
+    <m> --defeat-icmp-ratelimit -v <target>` by default, i.e. the n most
+    frequently used ports *per protocol* (n TCP + n UDP). With
     `all_ports=True` it instead runs `-p-`, every port 1-65535 for both
     protocols, and `top_ports` is ignored. Either way it reports which ports
     came back `open`; `open|filtered` -- what a silent UDP port looks like --
-    is not counted as open.
+    is not counted as open, and deliberately so (see `max_retries` below):
+    this validation only ever needs to prove nothing reports as open, not to
+    resolve every silent port down to a confident `closed`.
 
     -sS and -sU both need raw sockets, so this must run elevated
     (Administrator on Windows, root on Linux); without that nmap cannot
@@ -90,6 +95,39 @@ def scan_top_ports(
     ports commonly takes tens of minutes to hours depending on how the target
     rate-limits ICMP, so `timeout` needs to be sized generously for it.
 
+    `--min-rate`/`--defeat-icmp-ratelimit` matter most exactly when the target
+    is doing what TC-SM-41B deliberately provokes: `ip service all
+    admin-state disable` leaves the switch answering *nothing*, not even
+    ICMP unreachable, for any probe. nmap's adaptive timing reads total
+    silence as network congestion and throttles itself to compensate --
+    correct against a lossy real network, catastrophic against a target
+    that is silent by design, since with no negative signal to end a probe
+    early nmap waits out a growing per-probe timeout across all 131070
+    probes (65535 TCP + 65535 UDP) instead of sending near flat-out. Forcing
+    a floor on the send rate and telling nmap not to detect/react to ICMP
+    rate limiting keeps the scan close to `port_count / min_rate` seconds
+    instead of scaling with round-trip backoff; a run that still doesn't
+    finish inside `timeout` even with these needs the timeout raised further
+    or `min_rate` raised (`--min-rate` is capped by what the switch's own CPU
+    can sink before its replies -- for the ports it does answer -- start
+    getting dropped, so raise it gradually rather than assuming higher is
+    always faster).
+
+    `max_retries` bounds how many times nmap retransmits an unanswered probe
+    before giving up on a port and reporting whatever ambiguous state that
+    leaves it in (`open|filtered` for UDP, `filtered` for TCP) -- a *silent*
+    port, not a definite `closed` one, costs the most time precisely because
+    nmap keeps retrying it trying to get a real answer. The default timing
+    templates retry many more times than that in the name of accuracy, which
+    is the right tradeoff when the caller needs to tell `closed` apart from
+    `filtered`; this validation doesn't -- `open|filtered` already counts as
+    "not open" (see above), so there is nothing to gain from the extra
+    retries and every retry avoided is time back across 131070 probes.
+    Raising this only matters if a real open port is being missed because a
+    single probe got lost -- prefer raising `min_rate` first, since a lost
+    probe from sending too fast is a different problem than one from too few
+    retries.
+
     `on_progress` is called with each line of nmap output as it arrives, for
     callers that want to show the scan advancing rather than a silent wait.
     It does not affect the returned result.
@@ -104,6 +142,11 @@ def scan_top_ports(
         "-sU",
         *port_selector,
         f"-{timing}",
+        "--min-rate",
+        str(min_rate),
+        "--max-retries",
+        str(max_retries),
+        "--defeat-icmp-ratelimit",
         "-v",
         # Left on regardless of `on_progress`: unprompted, nmap only reports
         # percentages once a phase already looks slow, so a caller watching

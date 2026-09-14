@@ -18,6 +18,9 @@ class ValidationType(str, Enum):
     SNMP_SET = "snmp_set"
     SNMP_DENIED = "snmp_denied"
     SNMP_TRAP_RECEIVED = "snmp_trap_received"
+    WEB_TLS_RESTRICTED_UNREACHABLE = "web_tls_restricted_unreachable"
+    SSH_LEGACY_REJECTED = "ssh_legacy_rejected"
+    SSH_SESSION_EXPIRES = "ssh_session_expires"
 
 
 class TransportProtocol(str, Enum):

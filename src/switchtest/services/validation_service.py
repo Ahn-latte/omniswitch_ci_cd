@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import re
 
@@ -11,6 +12,7 @@ from switchtest.infrastructure.nmap import scan_port, scan_top_ports
 from switchtest.infrastructure.ping import ping_target
 from switchtest.infrastructure.reporting.progress import NmapProgressRenderer, SnmpTranscriptRenderer
 from switchtest.infrastructure.secrets import get_required_secret
+from switchtest.infrastructure.session_probe import check_ssh_session_expires
 from switchtest.infrastructure.snmp import (
     SnmpResult,
     SnmpV3Params,
@@ -19,10 +21,11 @@ from switchtest.infrastructure.snmp import (
     snmp_get,
     snmp_set,
 )
+from switchtest.infrastructure.ssh_probe import check_legacy_ssh_rejected
 from switchtest.infrastructure.tcp_probe import probe_tcp
 from switchtest.infrastructure.tls_capture import capture_tls_version
 from switchtest.infrastructure.trap_listener import TrapListener
-from switchtest.infrastructure.web_probe import check_web_unreachable
+from switchtest.infrastructure.web_probe import check_tls_restricted_unreachable, check_web_unreachable
 from switchtest.utils.text import normalize_cli_output
 
 
@@ -48,6 +51,9 @@ class ValidationService:
             ValidationType.SNMP_SET: self._validate_snmp_set,
             ValidationType.SNMP_DENIED: self._validate_snmp_denied,
             ValidationType.SNMP_TRAP_RECEIVED: self._validate_snmp_trap_received,
+            ValidationType.WEB_TLS_RESTRICTED_UNREACHABLE: self._validate_web_tls_restricted_unreachable,
+            ValidationType.SSH_LEGACY_REJECTED: self._validate_ssh_legacy_rejected,
+            ValidationType.SSH_SESSION_EXPIRES: self._validate_ssh_session_expires,
         }
         handler = handlers[validation.type]
         if validation.type in _SNMP_VALIDATIONS:
@@ -157,6 +163,8 @@ class ValidationService:
                 top_ports=validation.top_ports,
                 all_ports=validation.all_ports,
                 timeout=validation.timeout,
+                min_rate=validation.min_rate,
+                max_retries=validation.max_retries,
                 on_progress=progress.handle_line,
             )
         scope = f"{label} tcp and udp ports on {validation.target}"
@@ -243,6 +251,74 @@ class ValidationService:
             observed=detail,
             expected=f"tcp/{validation.port} on {validation.target} unreachable from this host",
             message=None if blocked else f"Expected the connection to be blocked, but {detail}",
+        )
+
+    def _validate_web_tls_restricted_unreachable(
+        self, driver: BaseSwitchDriver, validation: ValidationStep
+    ) -> ValidationResult:
+        unreachable, detail = check_tls_restricted_unreachable(
+            validation.target or "",
+            validation.port or 443,
+            tls_version=validation.tls_version,
+            timeout=validation.timeout,
+        )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if unreachable else ResultStatus.FAIL,
+            observed=detail,
+            expected=f"TLS {validation.tls_version} handshake to "
+            f"{validation.target}:{validation.port} rejected",
+            message=None
+            if unreachable
+            else f"WebView accepted a TLS {validation.tls_version} handshake -- should require "
+            f"1.2 or higher",
+        )
+
+    def _validate_ssh_legacy_rejected(
+        self, driver: BaseSwitchDriver, validation: ValidationStep
+    ) -> ValidationResult:
+        kwargs = {"client_banner": validation.ssh_client_banner} if validation.ssh_client_banner else {}
+        rejected, detail = check_legacy_ssh_rejected(
+            validation.target or "", validation.port or 22, timeout=validation.timeout, **kwargs
+        )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if rejected else ResultStatus.FAIL,
+            observed=detail,
+            expected="a legacy SSH-1.x client identification rejected",
+            message=None
+            if rejected
+            else "The switch did not clearly reject a legacy SSH-1 client identification",
+        )
+
+    def _validate_ssh_session_expires(
+        self, driver: BaseSwitchDriver, validation: ValidationStep
+    ) -> ValidationResult:
+        target = validation.target or ""
+        if not target:
+            raise ValidationExecutionError(f"Validation '{validation.name}' requires a target")
+        username = validation.session_username
+        if not username:
+            raise ValidationExecutionError(
+                f"Validation '{validation.name}' requires 'session_username'"
+            )
+        expired, detail = check_ssh_session_expires(
+            target,
+            validation.port or 22,
+            username,
+            validation.session_password or "",
+            idle_seconds=validation.idle_seconds,
+            timeout=validation.timeout,
+        )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if expired else ResultStatus.FAIL,
+            observed=detail,
+            expected=f"SSH session as '{username}' closed after {validation.idle_seconds}s idle",
+            message=None
+            if expired
+            else f"The session as '{username}' was still usable after "
+            f"{validation.idle_seconds}s idle -- the inactivity timeout was not enforced",
         )
 
     def _validate_snmp_get(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
@@ -381,7 +457,7 @@ class ValidationService:
         succeeded, but say nothing about whether the switch ever puts a
         packet on the wire.
 
-        Two ways to provoke the trap, usable together or alone:
+        Three ways to provoke the trap, usable together or alone:
 
         - `trigger_commands`: CLI commands run over the driver's console
           session (e.g. an admin-disable, for a linkDown trap).
@@ -392,8 +468,25 @@ class ValidationService:
           the original value is read back before the SET and restored after,
           regardless of whether the trap arrives or the wait raises, so this
           never leaves the object changed.
+        - `oid` + `bad_auth_password`: an SNMP GET against `oid` as
+          `snmp.user`, but with this password instead of the real one --
+          provokes a USM authentication failure, which is what
+          SNMPv2-MIB's `authenticationFailure` trap is specifically for.
+          Read-only, so nothing to restore. Deliberately not the same thing
+          as failing a CLI/SSH login on purpose: SNMP USM authentication is
+          a separate mechanism from the AAA lockout-threshold TC-IA-131/133
+          test, so this never risks locking a real account the way a
+          deliberately-wrong console/SSH password would.
+        - `login_failure_username` + `login_failure_password`: a single,
+          real SSH login attempt as this account with this (deliberately
+          wrong) password, over `driver.attempt_login` -- provokes whatever
+          trap the switch fires for an AAA/CLI authentication failure. This
+          IS the mechanism `bad_auth_password` above deliberately avoids: it
+          counts against the account's real lockout threshold, so callers
+          should use a single attempt against an account nothing else is
+          bracketing.
 
-        Binds the listener *before* running either trigger, so the provoking
+        Binds the listener *before* running any trigger, so the provoking
         action can never race ahead of this process listening for its result.
         """
         target = validation.target or ""
@@ -404,7 +497,8 @@ class ValidationService:
         oid = validation.oid
         new_value = validation.value
         snmp_triggers = oid is not None and new_value is not None
-        params = _snmp_params(validation) if snmp_triggers else None
+        auth_failure_trigger = validation.bad_auth_password is not None
+        params = _snmp_params(validation) if (snmp_triggers or auth_failure_trigger) else None
         original: SnmpResult | None = None
         # Deliberately not "did the GET succeed" -- only "did the SET actually
         # take" means there is something to put back. A rejected SET changed
@@ -421,7 +515,51 @@ class ValidationService:
                     driver.apply_config(validation.trigger_commands)
 
                 set_failure: ValidationResult | None = None
-                if snmp_triggers:
+
+                if validation.login_failure_username is not None:
+                    login_username = validation.login_failure_username
+                    login_succeeded = driver.attempt_login(
+                        login_username, validation.login_failure_password or ""
+                    )
+                    if login_succeeded:
+                        set_failure = ValidationResult(
+                            name=validation.name,
+                            status=ResultStatus.FAIL,
+                            observed=f"login as '{login_username}' unexpectedly succeeded with "
+                            f"the 'wrong' password",
+                            expected=f"authentication rejected for '{login_username}' with the "
+                            f"wrong password",
+                            message="The wrong password was unexpectedly accepted -- either it "
+                            "matches the real one by mistake, or something is misconfigured -- "
+                            "no trap was even attempted",
+                        )
+
+                if auth_failure_trigger and set_failure is None:
+                    if oid is None:
+                        raise ValidationExecutionError(
+                            f"Validation '{validation.name}' needs 'oid' to provoke an "
+                            f"authentication failure with 'bad_auth_password'"
+                        )
+                    assert params is not None
+                    bad_params = dataclasses.replace(
+                        params,
+                        auth_password=validation.bad_auth_password or "",
+                        priv_password=validation.bad_auth_password or "",
+                    )
+                    bad_auth_result = snmp_get(target, port, oid, bad_params, timeout=validation.timeout)
+                    if bad_auth_result.ok:
+                        set_failure = ValidationResult(
+                            name=validation.name,
+                            status=ResultStatus.FAIL,
+                            observed=redact(bad_params, bad_auth_result.detail),
+                            expected=f"authentication rejected for '{bad_params.user}' with "
+                            f"the wrong password",
+                            message="The wrong password was unexpectedly accepted -- either it "
+                            "matches the real one by mistake, or the agent is not actually "
+                            "enforcing SNMPv3 authentication -- no trap was even attempted",
+                        )
+
+                if snmp_triggers and set_failure is None:
                     assert oid is not None and params is not None
                     original = snmp_get(target, port, oid, params, timeout=validation.timeout)
                     if not original.ok:
@@ -465,7 +603,9 @@ class ValidationService:
         expected = f"a trap from {target} within {validation.timeout}s"
         if trap is None:
             observed = f"no datagram received on UDP/{validation.trap_port} from {target}"
-            if snmp_triggers:
+            if auth_failure_trigger:
+                observed += f" (the wrong password was correctly rejected for {oid})"
+            elif snmp_triggers:
                 observed += f" (the SET of {oid} itself succeeded)"
             return ValidationResult(
                 name=validation.name,

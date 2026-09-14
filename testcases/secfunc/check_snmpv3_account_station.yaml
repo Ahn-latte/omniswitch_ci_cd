@@ -35,6 +35,16 @@ description: >-
   UDP/162 바인드는 관리자 권한이 필요함(nmap의 -sS/-sU와 같은 이유). 이 PC에 실제 SNMP
   트랩 데몬이 이미 떠 있으면 포트 충돌로 이 검증이 바로 에러남 - 그 경우 그 데몬을 잠시
   내리거나 trap_port를 바꿀 것.
+
+  마지막 검증(login_failure_username)은 linkDown과는 다른 트리거로, secureadmin 계정에
+  일부러 틀린 비밀번호로 SSH 로그인을 한 번 시도해서(driver.attempt_login - 이 세션과는
+  별개 연결이라 콘솔 세션에 영향 없음) 스위치가 AAA/CLI 인증 실패에 대해서도 트랩을
+  보내는지 확인함. TC-SM-43의 bad_auth_password(SNMP USM 인증 실패)와는 별개 메커니즘 -
+  이건 진짜 로그인 실패라 secureadmin 계정의 실제 잠금 임계값을 소모함. 딱 한 번만
+  시도하도록 되어 있지만, 이 시험을 아주 짧은 간격으로 반복 실행하면 다른 실패 로그인과
+  누적되어 결국 secureadmin이 잠길 수 있음 - 그러면 이 시험은 물론 --device secureadmin을
+  쓰는 다른 모든 시험도 막힘. 실제로 잠겼다면 다른 계정의 콘솔/SSH 세션으로 `user
+  secureadmin unlock`을 실행할 것.
 feature: system
 tags: [secfunc, mgmt, snmp, audit, required, secureadmin, console]
 severity: high
@@ -58,6 +68,11 @@ setup:
       - ip service snmp admin-state enable
       - user snmpv3 password $test_password sha256+aes read-write all allow-ssh enable
       - snmp station $station_ip 161 snmpv3 v3 enable
+  # A previous run's login-failure trigger (below) is only ever one attempt,
+  # but start from a known-unlocked state anyway -- same reasoning as
+  # TC-IA-133's own ensure_unlocked before it deliberately fails a login.
+  - action: ensure_unlocked
+    username: secureadmin
 validations:
   - name: 감사로그에 스테이션 생성 성공 기록
     type: regex
@@ -101,6 +116,17 @@ validations:
     timeout: 30
     snmp:
       user: snmpv3
+  # 두 번째 실제 트리거 - CLI/SSH 계정 인증 실패. linkDown은 물리/설정 이벤트가
+  # 트리거지만, 이건 AAA 계층 이벤트가 트리거라 별개로 증명해야 함. snmp: 블록을
+  # 안 줬으므로 트랩의 SNMPv3 사용자 신원 검사는 건너뜀 - 이 트리거는 애초에 이
+  # 계정의 SNMPv3 신원과 무관한 이벤트임.
+  - name: secureadmin 인증 실패가 트랩을 유발함
+    type: snmp_trap_received
+    target: $host
+    trap_port: 161
+    login_failure_username: secureadmin
+    login_failure_password: "definitely-wrong-Passw0rd!1"
+    timeout: 30
 cleanup:
   - action: cli
     commands:
@@ -109,5 +135,7 @@ cleanup:
       # 위 트리거가 내린 포트를 되살림 - 이 시험이 끝난 뒤 $test_port 가 계속 죽어
       # 있으면 이후 어떤 시험이 그 포트를 쓰든 원인 불명의 실패로 보임.
       - interface port $test_port admin-state enable
+  - action: ensure_unlocked
+    username: secureadmin
 continue_on_failure: false
-timeout: 330
+timeout: 380

@@ -61,6 +61,25 @@ class ValidationStep(BaseModel):
     # to hours depending on the target's rate limiting); size `timeout`
     # accordingly.
     all_ports: bool = False
+    # For port_scan_closed: floor on nmap's send rate (packets/sec), plus
+    # telling it not to react to detected ICMP rate limiting. Without this, a
+    # target that is silent by design (TC-SM-41B's `ip service all
+    # admin-state disable` answers nothing, not even ICMP unreachable) makes
+    # nmap's adaptive timing mistake total silence for network congestion and
+    # throttle itself -- an all_ports scan can then run for hours without
+    # finishing inside a normal timeout. Lower this if the switch's own CPU
+    # starts dropping the replies it should be sending (fewer opens than
+    # actually exist is worse than a slow scan).
+    min_rate: int = 1000
+    # For port_scan_closed: how many times nmap retransmits an unanswered
+    # probe before giving up on a port. A silent port -- not a definite
+    # `closed` one -- costs the most time, precisely from retrying it; since
+    # `open|filtered` already counts as "not open" for this validation (it
+    # never needs to resolve ambiguity down to a confident `closed`), there
+    # is nothing to gain from the higher retry counts the default timing
+    # templates use for accuracy, and every retry avoided is time back
+    # across all 131070 probes of an all_ports scan.
+    max_retries: int = 1
     # For api_unreachable: the HTTP path to request. Keep it credential-free --
     # a request to the auth endpoint would count as a login attempt.
     path: str = "/"
@@ -77,6 +96,50 @@ class ValidationStep(BaseModel):
     # to provoke the trap, issued only after the listener socket is already
     # bound -- see TrapListener's docstring for why that order is mandatory.
     trigger_commands: list[str] = Field(default_factory=list)
+    # For snmp_trap_received: an SNMP GET against `oid` using `snmp.user` but
+    # this password instead of the real one -- provokes a USM authentication
+    # failure as the trigger for `authenticationFailure` (SNMPv2-MIB), rather
+    # than a real SET or a CLI action. Deliberately not the same mechanism as
+    # a CLI/SSH login failure: SNMP USM authentication is independent of the
+    # AAA lockout-threshold that TC-IA-131/133 test, so unlike failing a
+    # console/SSH login on purpose, this never risks locking a real account.
+    bad_auth_password: Optional[str] = None
+    # For snmp_trap_received: a single, real SSH login attempt as this
+    # account with this (deliberately wrong) password -- provokes whatever
+    # trap the switch fires for an AAA/CLI authentication failure, as
+    # opposed to `bad_auth_password` above (SNMP USM, a separate mechanism).
+    # Unlike SNMP USM, this DOES count against the account's lockout
+    # threshold like any real failed login, so keep this to one attempt and
+    # never point it at an account another testcase is actively bracketing
+    # (e.g. admin1 during TC-IA-131/133).
+    login_failure_username: Optional[str] = None
+    login_failure_password: Optional[str] = None
+
+    # For web_tls_restricted_unreachable: the exact TLS version Firefox is
+    # pinned to (min == max) before navigating. A switch that requires TLS
+    # 1.2+ should refuse the handshake outright.
+    tls_version: str = "1.1"
+
+    # For ssh_legacy_rejected: override the client identification string sent
+    # after the version exchange (RFC 4253 4.2). Left unset, the validator's
+    # own default (an SSH-1.5 banner) is used.
+    ssh_client_banner: Optional[str] = None
+
+    # For ssh_session_expires: credentials for a fresh SSH session -- never
+    # the driver's own -- that is left idle to prove the switch's configured
+    # inactivity timeout actually disconnects it, not just that `session cli
+    # timeout` is set. Use a throwaway account (e.g. one this testcase's own
+    # setup creates with `$test_password`), not secureadmin/admin1: AOS
+    # allows only one session per account across every transport, and the
+    # driver already holds one open as whichever account is running this
+    # testcase.
+    session_username: Optional[str] = None
+    session_password: Optional[str] = None
+    # How long to sit idle before trying the session again. Comfortably past
+    # the configured timeout (in minutes) rather than equal to it, so a
+    # session that survives isn't mistaken for one that expired just outside
+    # a race with the switch's own timer.
+    idle_seconds: int = 75
 
 
 class TestCaseDefinition(BaseModel):

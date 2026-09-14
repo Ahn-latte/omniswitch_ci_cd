@@ -1,0 +1,25 @@
+id: TC-DP-717B
+name: SSH refuses a legacy protocol-1 client
+description: >-
+  TC-DP-717(SSH 서비스 활성화 여부)의 반대편 - "v2 이상만 지원"은 v1을 실제로 거부해야
+  증명됨. 실제 SSH1 클라이언트로 접속을 "시도"할 수는 없음 - OpenSSH가 2017년(7.6)에
+  프로토콜1 지원을 클라이언트에서 완전히 제거했고, 지금까지 유지보수되는 SSH1 클라이언트
+  라이브러리가 없음. 대신 모든 SSH 연결이 키교환 이전에 주고받는 버전 교환 줄(RFC 4253
+  4.2)만 프로토콜 1.5로 주장해서 보냄 - 프로토콜 2만 구현한 서버는 그 시점에서 연결을
+  거부하거나 끊는 수밖에 없으므로, 그게 곧 "SSH1이 거부됨"이 와이어 위에서 보이는 모습임.
+
+  소켓이 끊기거나 리셋되는 것만 "거부"로 통과시키고, 응답 없이 열려만 있는 경우는 통과시키지
+  않음(모호한 결과는 증명이 아님).
+feature: system
+tags: [secfunc, transport, network]
+severity: high
+setup: []
+validations:
+  - name: SSH-1.5 클라이언트 식별 문자열이 거부됨
+    type: ssh_legacy_rejected
+    target: $host
+    port: 22
+    timeout: 15
+cleanup: []
+continue_on_failure: false
+timeout: 60

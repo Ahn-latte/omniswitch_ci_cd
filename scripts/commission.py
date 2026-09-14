@@ -345,12 +345,23 @@ def stage_port_scan(lab: LabConfig, arguments: argparse.Namespace) -> Stage:
     local`: on this firmware that command switches SNMP on, so a scan after it
     finds UDP/161 open and the "factory switch is silent" claim would be
     reported as broken when it is not.
+
+    Full range (1-65535) by default, not a --top-ports sample: a sample skips
+    real ports (2222/tcp, ssh-pkix, ranks ~366th by nmap's own frequency
+    table and is never included even at --top-ports 1000 -- see TC-SM-41B in
+    omniswitch_ci_cd's own suite, which hit exactly this gap). --min-rate and
+    --defeat-icmp-ratelimit (scan_top_ports) keep this fast even though a
+    factory-reset switch, like TC-SM-41B's target, answers nothing --
+    theoretically close to 131070 probes / min_rate seconds; pass
+    --top-ports to fall back to the faster, less thorough sample instead.
     """
     stage = Stage("서비스 활성화 전 포트스캔 (전부 닫힘)")
+    all_ports = arguments.top_ports is None
+    label = "전체(1-65535)" if all_ports else f"상위 {arguments.top_ports}개"
     if arguments.skip_scan:
         stage.checks.append(
             Check(
-                name=f"상위 {arguments.top_ports}개 tcp/udp 포트 중 열린 것 없음",
+                name=f"{label} tcp/udp 포트 중 열린 것 없음",
                 passed=True,
                 observed="skipped (--skip-scan)",
                 expected="no open ports",
@@ -360,7 +371,11 @@ def stage_port_scan(lab: LabConfig, arguments: argparse.Namespace) -> Stage:
     try:
         open_ports, summary = scan_top_ports(
             lab.switch.host,
-            top_ports=arguments.top_ports,
+            top_ports=arguments.top_ports or 100,
+            all_ports=all_ports,
+            timeout=arguments.scan_timeout,
+            min_rate=arguments.min_rate,
+            max_retries=arguments.max_retries,
             on_progress=lambda line: print(f"  {line}", end="\r"),
         )
     except Exception as exc:  # noqa: BLE001 - reported, not raised: later stages still matter
@@ -369,7 +384,7 @@ def stage_port_scan(lab: LabConfig, arguments: argparse.Namespace) -> Stage:
     print()
     stage.checks.append(
         Check(
-            name=f"상위 {arguments.top_ports}개 tcp/udp 포트 중 열린 것 없음",
+            name=f"{label} tcp/udp 포트 중 열린 것 없음",
             passed=not open_ports,
             observed=summary,
             expected=f"no open ports on {lab.switch.host}",
@@ -620,7 +635,40 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--lab", type=Path, default=DEFAULT_LAB_FILE)
     parser.add_argument("--report", type=Path, default=REPO_ROOT / "reports" / "commission.json")
-    parser.add_argument("--top-ports", type=int, default=100)
+    parser.add_argument(
+        "--top-ports",
+        type=int,
+        default=None,
+        help="scan only the N most common ports per protocol instead of the "
+        "full 1-65535 range (faster, but can miss a real port -- see "
+        "TC-SM-41B in omniswitch_ci_cd)",
+    )
+    parser.add_argument(
+        "--scan-timeout",
+        type=int,
+        default=900,
+        help="seconds to allow the port scan (default 900; the full-range "
+        "scan is normally much faster than this with --min-rate, but a "
+        "switch that answers even less than expected can still need more)",
+    )
+    parser.add_argument(
+        "--min-rate",
+        type=int,
+        default=1000,
+        help="nmap send-rate floor (default 1000; lower this if the switch's "
+        "own CPU starts dropping replies under load, which would hide real "
+        "open ports rather than just being slow)",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=1,
+        help="how many times nmap retries an unanswered probe before giving "
+        "up on a port (default 1; a silent port reported as open|filtered "
+        "already counts as 'not open' here, so there is little to gain from "
+        "raising this -- prefer --min-rate first if a real open port seems "
+        "to be getting missed)",
+    )
     parser.add_argument(
         "--skip-scan",
         action="store_true",

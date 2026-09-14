@@ -117,6 +117,27 @@ Some checks need hardware:
 > — commonly tens of minutes to a couple of hours depending on how the switch
 > rate-limits ICMP. That's why this testcase's own `timeout` is set to 3600s;
 > raise it further if your switch needs longer.
+>
+> **The scan can still blow past 3600s, and the cause is specific to this
+> testcase**: its own setup (`ip service all admin-state disable`) leaves the
+> switch answering *nothing*, not even ICMP unreachable. nmap's adaptive
+> timing reads that total silence as network congestion and throttles
+> itself to compensate — exactly backwards when the target is silent by
+> design rather than lossy. `scan_top_ports` now always passes `--min-rate`
+> (a floor on send rate; `min_rate` on the validation, default 1000) and
+> `--defeat-icmp-ratelimit`, which keeps the scan close to
+> `131070 probes / min_rate` seconds instead of scaling with per-probe
+> backoff. If it's still too slow, raise `min_rate` gradually — too high and
+> the switch's own CPU starts dropping the replies it should be sending,
+> which would hide real open ports rather than just being slow.
+>
+> `--max-retries` (`max_retries` on the validation, default 1) is the other
+> lever, and it's safe to keep low: this validation already treats
+> `open|filtered` (an unanswered UDP port) as "not open", so there's nothing
+> to gain from the higher retry counts nmap's default timing templates use to
+> resolve that ambiguity down to a confident `closed` — and every retry
+> avoided is time back across all 131070 probes. Raise it only if a scan
+> seems to be missing a port that really is open.
 
 ## Commissioning a factory-reset switch
 
@@ -143,7 +164,15 @@ only moment they can be observed:
 3. **Nothing is listening** before services are switched on. This runs after
    addressing but *before* `aaa authentication default local` — that command
    turns SNMP on, so scanning afterwards would find UDP/161 open and report a
-   finding that isn't one.
+   finding that isn't one. Full range (1-65535), not a `--top-ports` sample,
+   for the same reason as `TC-SM-41B` in the suites: a sample can and does
+   skip real ports (2222/tcp, ssh-pkix, never included even at
+   `--top-ports 1000`). `--min-rate`/`--defeat-icmp-ratelimit` keep this fast
+   even against a switch that, like `TC-SM-41B`'s target, answers nothing
+   yet. Pass `--top-ports N` to fall back to the faster sample instead, and
+   `--scan-timeout`/`--min-rate`/`--max-retries` to tune the scan (same
+   rationale as `TC-SM-41B` above: `open|filtered` already counts as "not
+   open", so `--max-retries` defaults to 1).
 
 It then creates the accounts without `provision:` (the provisioned ones are
 made and removed per-run by `run_secfunc.py`) and saves the configuration —
@@ -341,18 +370,28 @@ Order matters; the destructive entries are last and must stay there.
 > enabled it on — the trap would silently never leave the switch without
 > this.
 
-> **`TC-SM-43` proves a *second*, independent way to trigger a trap: an
-> ordinary SNMP SET,** not just `TC-SM-42`'s admin-disable. It configures its
-> own trap station (`snmp station $station_ip 161 snmpv3 v3 enable`,
-> separate from `TC-SM-42`'s — the two testcases don't share accounts, and
-> now don't share station config either) and folds the trap check into the
-> existing "does the SET take" validation's own SET, using
-> `snmp_trap_received`'s `oid`+`value` trigger mode instead of
-> `trigger_commands`. Whether an SNMP SET causes a trap at all is not a
-> protocol guarantee the way `linkDown` is — some agents fire a
-> config-change notification on writes, many don't — so this is worth
-> having as a second data point alongside `TC-SM-42`'s, not a replacement
-> for it.
+> **`TC-SM-43` proves a *second*, independent way to trigger a trap: a
+> deliberate SNMP authentication failure,** not just `TC-SM-42`'s
+> admin-disable. It configures its own trap station (`snmp station
+> $station_ip 161 snmpv3 v3 enable`, separate from `TC-SM-42`'s — the two
+> testcases don't share accounts, and now don't share station config
+> either) and uses `snmp_trap_received`'s `oid`+`bad_auth_password` trigger
+> mode: a GET against `sysName.0` as `snmpv3` but with the wrong password,
+> which is exactly what SNMPv2-MIB's `authenticationFailure` trap exists
+> for. Read-only, so there's nothing to restore, and — unlike deliberately
+> failing a console/SSH login — SNMP USM authentication is a separate
+> mechanism from the AAA lockout-threshold `TC-IA-131`/`TC-IA-133` test, so
+> this never risks locking a real account.
+>
+> This replaced an earlier attempt that used an ordinary SNMP SET as the
+> trigger instead. Manually repeating that SET with the station IP
+> corrected and a live packet capture running (`tshark -f "udp and host
+> <switch>"`) showed no trap on the wire at all, even though the SET itself
+> visibly succeeded — conclusive, independent evidence that this firmware
+> simply does not fire a notification for a plain SNMP write.
+> `authenticationFailure` is worth trying instead precisely because it's an
+> RFC-defined trap type, not a vendor-optional one the way a config-change
+> notification on SET is.
 
 > **Known firmware bug — `TC-AU-811` is expected to fail.** Its "firmware
 > update" check looks for `AOS upgrade or downgrade complete` in swlog, and
@@ -528,6 +567,25 @@ venv\Scripts\switchtest list-devices    # 이 계정들로 생성되는 세션 �
 > ICMP를 어떻게 rate limit 하느냐에 따라 보통 수십 분에서 한두 시간까지
 > 걸립니다. 그래서 이 테스트케이스의 `timeout`을 3600초로 잡아뒀고, 그래도
 > 부족하면 더 올리세요.
+>
+> **그런데도 3600초를 넘길 수 있는데, 원인이 이 테스트케이스 고유의 상황입니다.**
+> 이 시험의 setup(`ip service all admin-state disable`) 자체가 스위치를
+> "아무 것도 답하지 않는" 상태로 만듭니다 - ICMP unreachable조차 안 보냅니다.
+> nmap의 적응형 타이밍은 이 완전한 침묵을 네트워크 혼잡으로 오판해 스스로
+> 속도를 늦추는데, 대상이 원래 느린 게 아니라 설계상 침묵하는 거라 이건
+> 정반대로 작용합니다. 그래서 `scan_top_ports`는 이제 항상 `--min-rate`(전송
+> 속도 하한 - validation의 `min_rate`, 기본 1000)와 `--defeat-icmp-ratelimit`을
+> 함께 줘서, 스캔 시간이 요청 단위 백오프가 아니라 `131070개 프로브 /
+> min_rate` 초에 가깝게 유지되도록 합니다. 그래도 느리면 `min_rate`를
+> 점진적으로 올리세요 - 너무 높이면 스위치 자체 CPU가 응답을 못 따라가서
+> 실제로 열린 포트를 놓칠 수 있어서, 그냥 느린 것보다 더 나쁩니다.
+>
+> 또 하나의 조절 레버는 `--max-retries`(validation의 `max_retries`, 기본
+> 1)입니다. 낮게 둬도 안전합니다 - 이 검증은 응답 없는 UDP 포트(`open|filtered`)를
+> 이미 "열려 있지 않음"으로 통과시키므로, 그걸 확실한 `closed`로 확정하기
+> 위해 nmap 기본 타이밍 템플릿만큼 재시도할 이유가 없고, 재시도 한 번이
+> all_ports 스캔 131070개 프로브 전체에 곱으로 걸립니다. 실제 열린 포트를
+> 놓치는 것 같을 때만 올리세요.
 
 ### 공장 초기화된 스위치 세워 올리기
 
@@ -554,7 +612,15 @@ venv\Scripts\python.exe scripts\commission.py
 3. **서비스를 켜기 전에는 아무것도 열려 있지 않은지** (포트스캔). 이 검사는
    주소 설정 뒤, 그러나 `aaa authentication default local` **앞**에 실행합니다 —
    이 명령이 SNMP를 켜기 때문에, 뒤에서 스캔하면 UDP/161이 열린 것으로 나와
-   발견이 아닌 것을 발견으로 보고하게 됩니다.
+   발견이 아닌 것을 발견으로 보고하게 됩니다. `--top-ports` 표본이 아니라
+   전체(1-65535)를 봅니다 - suites의 `TC-SM-41B`와 같은 이유로, 표본 방식은
+   실제 포트(2222/tcp, ssh-pkix, `--top-ports 1000`을 줘도 절대 포함 안 됨)를
+   놓칩니다. `--min-rate`/`--defeat-icmp-ratelimit`가 `TC-SM-41B`의 대상처럼
+   아무것도 응답하지 않는 스위치에서도 빠르게 끝나게 해줍니다. 더 빠른 표본
+   방식으로 돌리려면 `--top-ports N`을, `--scan-timeout`/`--min-rate`/
+   `--max-retries`로 스캔을 조절할 수 있습니다 (위 `TC-SM-41B`와 같은 이유로
+   `open|filtered`가 이미 "열려 있지 않음"으로 통과하므로 `--max-retries`
+   기본값은 1입니다).
 
 그 다음 `provision:`이 없는 계정을 생성하고(있는 계정은 `run_secfunc.py`가 매
 실행 생성·삭제) 설정을 저장합니다. 저장이 옳은 유일한 경우입니다 — 브링업은
@@ -753,16 +819,25 @@ swlog를 **읽을 수 없다는 것**이 요점인 유일한 시험입니다 —
 > 켜놓지 않은 새 스위치에서는 이게 없으면 트랩이 조용히 스위치 밖으로 나가지
 > 않습니다.
 
-> **`TC-SM-43`은 `TC-SM-42`의 admin-disable과는 별개로, 평범한 SNMP SET
-> 하나로도 트랩을 유발할 수 있는지 두 번째로 확인합니다.** 자기 트랩
+> **`TC-SM-43`은 `TC-SM-42`의 admin-disable과는 별개로, 일부러 낸 SNMP
+> 인증 실패로도 트랩을 유발할 수 있는지 두 번째로 확인합니다.** 자기 트랩
 > 스테이션을 스스로 만들고(`snmp station $station_ip 161 snmpv3 v3
 > enable` - `TC-SM-42`와 계정을 공유하지 않듯 station 설정도 따로 만듦),
-> 이미 있던 "SET이 실제로 반영되는지" 검증의 그 SET 자체를
-> `snmp_trap_received`의 `oid`+`value` 트리거 모드로 재사용해서 트랩
-> 확인을 얹었습니다(`trigger_commands` 대신). SNMP SET이 트랩을 유발하는
-> 것은 `linkDown`처럼 프로토콜이 보장하는 동작이 아닙니다 - 설정 변경
-> 알림을 보내는 에이전트도 있고 안 보내는 것도 많습니다 - 그래서 이건
-> `TC-SM-42`를 대체하는 게 아니라 별개의 두 번째 근거로 두는 것입니다.
+> `snmp_trap_received`의 `oid`+`bad_auth_password` 트리거 모드를 씁니다:
+> `snmpv3` 계정으로 `sysName.0`을 GET하되 일부러 틀린 비밀번호를 써서,
+> SNMPv2-MIB의 `authenticationFailure` 트랩이 원래 존재하는 바로 그
+> 상황을 만듭니다. GET이라 되돌릴 것도 없고, console/SSH 로그인을
+> 일부러 틀리는 것과 달리 SNMP USM 인증은 `TC-IA-131`/`TC-IA-133`이
+> 시험하는 AAA lockout-threshold와 별개 메커니즘이라 실 계정이 잠길
+> 위험도 없습니다.
+>
+> 이전엔 트리거로 평범한 SNMP SET을 썼습니다. 스테이션 IP를 바로잡은
+> 뒤 그 SET을 수동으로 다시 하면서 패킷 캡처(`tshark -f "udp and host
+> <스위치>"`)를 같이 떠 봤는데, SET 자체는 분명히 성공했는데도 와이어에
+> 트랩이 전혀 안 잡혔습니다 — 이 펌웨어가 평범한 SNMP 쓰기에는 알림을
+> 아예 안 보낸다는 걸 독립적으로 확인한 셈입니다. `authenticationFailure`로
+> 바꾼 이유가 이거입니다 - SET에 대한 설정변경 알림은 벤더가 선택적으로
+> 구현하는 것이지만, 이건 RFC가 정의한 표준 트랩 타입이기 때문입니다.
 
 > **알려진 펌웨어 버그 — `TC-AU-811`은 실패하는 것이 정상입니다.** "펌웨어
 > 업데이트" 검증이 swlog에서 `AOS upgrade or downgrade complete`를 찾는데, 이

@@ -97,6 +97,11 @@ def test_top_ports_scan_builds_the_agreed_command(fake_nmap) -> None:
         "--top-ports",
         "100",
         "-T4",
+        "--min-rate",
+        "1000",
+        "--max-retries",
+        "1",
+        "--defeat-icmp-ratelimit",
         "-v",
         # Without this nmap stays quiet until a phase already looks slow, and
         # there would be nothing to show while the scan runs.
@@ -122,6 +127,11 @@ def test_all_ports_scan_uses_p_dash_instead_of_top_ports(fake_nmap) -> None:
         "-sU",
         "-p-",
         "-T4",
+        "--min-rate",
+        "1000",
+        "--max-retries",
+        "1",
+        "--defeat-icmp-ratelimit",
         "-v",
         "--stats-every",
         "2s",
@@ -136,6 +146,31 @@ def test_all_ports_ignores_top_ports_value(fake_nmap) -> None:
 
     assert "--top-ports" not in calls[0]
     assert "-p-" in calls[0]
+
+
+def test_min_rate_is_tunable(fake_nmap) -> None:
+    """Defaults to 1000, but a switch whose own CPU starts dropping replies
+    under load needs this lowered -- exposed as a real parameter rather than
+    hardcoded, unlike `timing`."""
+    calls, _ = fake_nmap(CLOSED_OUTPUT)
+
+    scan_top_ports("192.168.1.1", min_rate=200)
+
+    assert "--min-rate" in calls[0]
+    assert calls[0][calls[0].index("--min-rate") + 1] == "200"
+
+
+def test_max_retries_is_tunable(fake_nmap) -> None:
+    """Defaults to 1: a silent port already counts as "not open" via
+    open|filtered, so there is nothing to gain from the higher retry counts
+    the default timing templates use for accuracy -- but raising it stays
+    available for a run that seems to be missing a real open port."""
+    calls, _ = fake_nmap(CLOSED_OUTPUT)
+
+    scan_top_ports("192.168.1.1", max_retries=3)
+
+    assert "--max-retries" in calls[0]
+    assert calls[0][calls[0].index("--max-retries") + 1] == "3"
 
 
 def test_scan_output_is_streamed_to_the_progress_callback(fake_nmap) -> None:

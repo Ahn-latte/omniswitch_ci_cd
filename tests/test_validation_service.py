@@ -18,6 +18,11 @@ class StubDriver:
         # and not after the wait had already given up.
         self._events = events
         self.applied_commands: list[list[str]] = []
+        # None means "not configured for this test" -- attempt_login raises
+        # if called without a test having set it, so an unexpected call is
+        # loud rather than silently returning some default.
+        self.login_attempts: list[tuple[str, str]] = []
+        self.login_result: bool | None = None
 
     def run_show(self, command: str, timeout: int = 30, reauth: bool = False) -> str:
         if command == "show vlan":
@@ -29,6 +34,13 @@ class StubDriver:
         if self._events is not None:
             self._events.append("triggered")
         return list(commands)
+
+    def attempt_login(self, username: str, password: str, timeout: int = 15) -> bool:
+        self.login_attempts.append((username, password))
+        if self._events is not None:
+            self._events.append("triggered")
+        assert self.login_result is not None, "test did not set StubDriver.login_result"
+        return self.login_result
 
 
 def test_contains_validator_passes() -> None:
@@ -208,11 +220,160 @@ def test_tcp_blocked_validator_fails_when_connection_succeeds(monkeypatch) -> No
     assert result.status == ResultStatus.FAIL
 
 
+def test_web_tls_restricted_unreachable_passes_when_handshake_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_tls_restricted_unreachable",
+        lambda target, port, tls_version, timeout: (True, "handshake failed as expected"),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="tls 1.1 rejected",
+            type=ValidationType.WEB_TLS_RESTRICTED_UNREACHABLE,
+            target="192.0.2.1",
+            port=443,
+        ),
+    )
+    assert result.status == ResultStatus.PASS
+
+
+def test_web_tls_restricted_unreachable_fails_when_handshake_succeeds(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_tls_restricted_unreachable",
+        lambda target, port, tls_version, timeout: (False, "handshake succeeded"),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="tls 1.1 rejected",
+            type=ValidationType.WEB_TLS_RESTRICTED_UNREACHABLE,
+            target="192.0.2.1",
+            port=443,
+        ),
+    )
+    assert result.status == ResultStatus.FAIL
+
+
+def test_ssh_legacy_rejected_passes_when_the_switch_closes_the_connection(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_legacy_ssh_rejected",
+        lambda target, port, timeout: (True, "server closed the connection"),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="ssh1 rejected",
+            type=ValidationType.SSH_LEGACY_REJECTED,
+            target="192.0.2.1",
+            port=22,
+        ),
+    )
+    assert result.status == ResultStatus.PASS
+
+
+def test_ssh_legacy_rejected_fails_without_a_confirmed_closure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_legacy_ssh_rejected",
+        lambda target, port, timeout: (False, "connection still open, no response"),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="ssh1 rejected",
+            type=ValidationType.SSH_LEGACY_REJECTED,
+            target="192.0.2.1",
+            port=22,
+        ),
+    )
+    assert result.status == ResultStatus.FAIL
+
+
+def test_ssh_legacy_rejected_passes_a_custom_banner_through(monkeypatch) -> None:
+    seen: dict = {}
+
+    def fake_check(target, port, timeout, **kwargs):
+        seen.update(kwargs)
+        return True, "closed"
+
+    monkeypatch.setattr(validation_service_module, "check_legacy_ssh_rejected", fake_check)
+    ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="ssh1 rejected",
+            type=ValidationType.SSH_LEGACY_REJECTED,
+            target="192.0.2.1",
+            port=22,
+            ssh_client_banner="SSH-1.99-custom",
+        ),
+    )
+    assert seen == {"client_banner": "SSH-1.99-custom"}
+
+
+def test_ssh_session_expires_passes_when_the_session_is_no_longer_usable(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_ssh_session_expires",
+        lambda host, port, username, password, idle_seconds, timeout: (
+            True,
+            "session was reset to a login prompt",
+        ),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="ssh session expires",
+            type=ValidationType.SSH_SESSION_EXPIRES,
+            target="192.0.2.1",
+            session_username="sessiontest",
+            session_password="x",
+        ),
+    )
+    assert result.status == ResultStatus.PASS
+
+
+def test_ssh_session_expires_fails_when_the_session_survives(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_ssh_session_expires",
+        lambda host, port, username, password, idle_seconds, timeout: (
+            False,
+            "session was still usable",
+        ),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="ssh session expires",
+            type=ValidationType.SSH_SESSION_EXPIRES,
+            target="192.0.2.1",
+            session_username="sessiontest",
+            session_password="x",
+        ),
+    )
+    assert result.status == ResultStatus.FAIL
+
+
+def test_ssh_session_expires_requires_a_session_username() -> None:
+    with pytest.raises(ValidationExecutionError, match="session_username"):
+        ValidationService().run_validation(
+            StubDriver(),
+            ValidationStep(
+                name="ssh session expires",
+                type=ValidationType.SSH_SESSION_EXPIRES,
+                target="192.0.2.1",
+            ),
+        )
+
+
 def test_port_scan_closed_passes_when_nothing_is_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "scan_top_ports",
-        lambda target, top_ports, all_ports, timeout, on_progress: (
+        lambda target, top_ports, all_ports, timeout, min_rate, max_retries, on_progress: (
             [],
             "All 200 scanned ports on 192.0.2.1 are closed",
         ),
@@ -232,7 +393,7 @@ def test_port_scan_closed_names_the_ports_still_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
         "scan_top_ports",
-        lambda target, top_ports, all_ports, timeout, on_progress: (
+        lambda target, top_ports, all_ports, timeout, min_rate, max_retries, on_progress: (
             ["22/tcp open (ssh)"],
             "22/tcp open ssh",
         ),
@@ -255,7 +416,7 @@ def test_port_scan_closed_passes_all_ports_through_to_the_scan(monkeypatch) -> N
     --top-ports sample instead, and no test failure ever points at that."""
     seen: dict = {}
 
-    def fake_scan(target, top_ports, all_ports, timeout, on_progress):
+    def fake_scan(target, top_ports, all_ports, timeout, min_rate, max_retries, on_progress):
         seen["all_ports"] = all_ports
         return [], "All 131070 scanned ports on 192.0.2.1 are closed"
 
@@ -592,4 +753,151 @@ def test_trap_received_via_snmp_set_failure_skips_the_wait(monkeypatch) -> None:
     assert "no trap was even attempted" in result.message
     # wait_for was never reached -- FakeTrapListener only records "waited" if
     # it was actually called.
+    assert "waited" not in events
+
+
+# -- snmp_trap_received triggered by a deliberate SNMP authentication failure
+#
+# Separate from failing a CLI/SSH login on purpose (which counts against the
+# AAA lockout-threshold TC-IA-131/133 test): SNMP USM authentication is its
+# own mechanism, so a wrong SNMPv3 password never risks locking a real
+# account. This is what SNMPv2-MIB's `authenticationFailure` trap exists for.
+
+
+def test_trap_received_via_bad_auth_password_uses_the_wrong_password_not_the_real_one(
+    monkeypatch,
+) -> None:
+    events: list = []
+    trap = ReceivedTrap(source_ip="192.0.2.1", payload=b"\x30\x00", version="v3", username="snmpv3")
+    _install_fake_trap_listener(monkeypatch, events, trap)
+
+    get_calls: list = []
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_get",
+        lambda target, port, oid, params, timeout: (
+            get_calls.append(params.auth_password) or _fake_snmp_result(False, None, "wrongDigest")
+        ),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="bad auth triggers a trap",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            oid="sysName.0",
+            bad_auth_password="definitely-not-the-real-one",
+            timeout=5,
+            snmp=SnmpCredentials(user="snmpv3", auth_password="the-real-password"),
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+    # The GET that provoked the failure used the wrong password -- the
+    # validation's own `snmp:` credentials (the real password) were never
+    # sent, which is the whole point of this trigger.
+    assert get_calls == ["definitely-not-the-real-one"]
+
+
+def test_trap_received_via_bad_auth_password_requires_an_oid() -> None:
+    with pytest.raises(ValidationExecutionError, match="oid"):
+        ValidationService().run_validation(
+            StubDriver(),
+            ValidationStep(
+                name="bad auth triggers a trap",
+                type=ValidationType.SNMP_TRAP_RECEIVED,
+                target="192.0.2.1",
+                bad_auth_password="wrong",
+                timeout=5,
+                snmp=SnmpCredentials(user="snmpv3", auth_password="real"),
+            ),
+        )
+
+
+def test_trap_received_via_bad_auth_password_flags_an_unexpectedly_accepted_password(
+    monkeypatch,
+) -> None:
+    """If the "wrong" password is somehow accepted, that's not a trap-delivery
+    problem -- it's a sign the password matched by mistake, or that the agent
+    isn't enforcing SNMPv3 authentication at all. Either way, worth reporting
+    distinctly rather than just waiting out the timeout for a trap this
+    would never have provoked."""
+    events: list = []
+    _install_fake_trap_listener(monkeypatch, events, None)
+    monkeypatch.setattr(
+        validation_service_module,
+        "snmp_get",
+        lambda target, port, oid, params, timeout: _fake_snmp_result(True, "OS6900"),
+    )
+
+    result = ValidationService().run_validation(
+        StubDriver(events=events),
+        ValidationStep(
+            name="bad auth triggers a trap",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            oid="sysName.0",
+            bad_auth_password="wrong",
+            timeout=5,
+            snmp=SnmpCredentials(user="snmpv3", auth_password="real"),
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "unexpectedly accepted" in result.message
+    assert "waited" not in events
+
+
+def test_trap_received_via_login_failure_uses_attempt_login_not_the_drivers_own_session(
+    monkeypatch,
+) -> None:
+    events: list = []
+    trap = ReceivedTrap(source_ip="192.0.2.1", payload=b"\x30\x00", version=None, username=None)
+    _install_fake_trap_listener(monkeypatch, events, trap)
+    driver = StubDriver(events=events)
+    driver.login_result = False  # correctly rejected
+
+    result = ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="login failure triggers a trap",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            login_failure_username="secureadmin",
+            login_failure_password="definitely-wrong-Passw0rd!1",
+            timeout=5,
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+    assert driver.login_attempts == [("secureadmin", "definitely-wrong-Passw0rd!1")]
+    # attempt_login opens its own separate session (never the driver's own
+    # held one), so it's triggered like a CLI command: after binding, before
+    # waiting.
+    assert events == ["bound", "triggered", "waited", "closed"]
+
+
+def test_trap_received_via_login_failure_flags_an_unexpectedly_accepted_password(
+    monkeypatch,
+) -> None:
+    events: list = []
+    _install_fake_trap_listener(monkeypatch, events, None)
+    driver = StubDriver(events=events)
+    driver.login_result = True  # the "wrong" password was somehow accepted
+
+    result = ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="login failure triggers a trap",
+            type=ValidationType.SNMP_TRAP_RECEIVED,
+            target="192.0.2.1",
+            login_failure_username="secureadmin",
+            login_failure_password="not-actually-wrong",
+            timeout=5,
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "unexpectedly accepted" in result.message
     assert "waited" not in events
