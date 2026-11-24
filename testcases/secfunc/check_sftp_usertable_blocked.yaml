@@ -1,0 +1,53 @@
+id: TC-DP-718
+name: SFTP로 계정정보 파일(userTable)을 받을 수 없음 (권한 무관)
+description: >-
+  저장된 계정정보 파일(/flash/system/userTable11)은 어떤 권한 레벨의 계정으로도 SFTP
+  GET이 거부되어야 함 - 파일시스템 접근이 CLI 명령 권한 체계와 별개로 막혀 있는지 확인.
+  "권한 문자열이 이렇다"가 아니라 "실제로 파일을 못 받아온다"를 증명하는 behavioral
+  시험이라, WinSCP의 콘솔 모드(winscp.com /script=...)로 진짜 SFTP GET을 시도함 -
+  GUI를 조작하지 않고, 성공/실패를 프로세스 종료 코드와 실제로 로컬에 파일이 떨어졌는지로
+  판정함. winscp.com은 PATH에 없어도 됨 - 기본 설치 경로(Program Files, Program Files
+  (x86), LOCALAPPDATA)를 자동으로 찾아봄.
+
+  이 시험 전용의 읽기전용(read-only all)/전체권한(read-write all) 계정을 각각 만들어서
+  둘 다로 시도함 - 저권한이라 막히는 게 아니라 이 파일 자체가 권한과 무관하게 막혀 있어야
+  한다는 게 핵심 주장이므로, 관리자급 계정으로도 반드시 실패해야 함.
+
+  경로가 스위치/펌웨어에 따라 다르면 이 파일의 두 validation 모두 path 값을 함께 바꿀 것.
+feature: system
+tags: [secfunc, dataprotection, sftp]
+severity: high
+setup:
+  - action: cli
+    ignore_errors: true
+    commands:
+      - no user wsftpread
+      - no user wsftpadmin
+  - action: cli
+    commands:
+      - user wsftpread password $test_password read-only all allow-ssh enable
+      - user wsftpadmin password $test_password read-write all allow-ssh enable
+validations:
+  - name: 읽기전용 계정으로도 userTable 다운로드 실패
+    type: sftp_download_blocked
+    target: $host
+    port: 22
+    session_username: wsftpread
+    session_password: $test_password
+    path: /flash/system/userTable11
+    timeout: 20
+  - name: 전체권한 계정으로도 userTable 다운로드 실패
+    type: sftp_download_blocked
+    target: $host
+    port: 22
+    session_username: wsftpadmin
+    session_password: $test_password
+    path: /flash/system/userTable11
+    timeout: 20
+cleanup:
+  - action: cli
+    commands:
+      - no user wsftpread
+      - no user wsftpadmin
+continue_on_failure: false
+timeout: 120

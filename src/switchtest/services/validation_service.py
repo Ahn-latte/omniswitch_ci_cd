@@ -26,6 +26,7 @@ from switchtest.infrastructure.tcp_probe import probe_tcp
 from switchtest.infrastructure.tls_capture import capture_tls_version
 from switchtest.infrastructure.trap_listener import TrapListener
 from switchtest.infrastructure.web_probe import check_tls_restricted_unreachable, check_web_unreachable
+from switchtest.infrastructure.winscp_probe import check_sftp_download_blocked
 from switchtest.utils.text import normalize_cli_output
 
 
@@ -54,6 +55,7 @@ class ValidationService:
             ValidationType.WEB_TLS_RESTRICTED_UNREACHABLE: self._validate_web_tls_restricted_unreachable,
             ValidationType.SSH_LEGACY_REJECTED: self._validate_ssh_legacy_rejected,
             ValidationType.SSH_SESSION_EXPIRES: self._validate_ssh_session_expires,
+            ValidationType.SFTP_DOWNLOAD_BLOCKED: self._validate_sftp_download_blocked,
         }
         handler = handlers[validation.type]
         if validation.type in _SNMP_VALIDATIONS:
@@ -319,6 +321,40 @@ class ValidationService:
             if expired
             else f"The session as '{username}' was still usable after "
             f"{validation.idle_seconds}s idle -- the inactivity timeout was not enforced",
+        )
+
+    def _validate_sftp_download_blocked(
+        self, driver: BaseSwitchDriver, validation: ValidationStep
+    ) -> ValidationResult:
+        target = validation.target or ""
+        if not target:
+            raise ValidationExecutionError(f"Validation '{validation.name}' requires a target")
+        username = validation.session_username
+        if not username:
+            raise ValidationExecutionError(
+                f"Validation '{validation.name}' requires 'session_username'"
+            )
+        remote_path = validation.path
+        if not remote_path or remote_path == "/":
+            raise ValidationExecutionError(
+                f"Validation '{validation.name}' requires 'path' (the remote file to attempt)"
+            )
+        blocked, detail = check_sftp_download_blocked(
+            target,
+            validation.port or 22,
+            username,
+            validation.session_password or "",
+            remote_path,
+            timeout=validation.timeout,
+        )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS if blocked else ResultStatus.FAIL,
+            observed=detail,
+            expected=f"SFTP download of '{remote_path}' as '{username}' blocked",
+            message=None
+            if blocked
+            else f"'{username}' was able to download '{remote_path}' over SFTP",
         )
 
     def _validate_snmp_get(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:

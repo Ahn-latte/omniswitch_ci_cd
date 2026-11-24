@@ -1,6 +1,6 @@
 name: secfunc_all_ssh
 description: >-
-  SSH로 붙는 admin 계정 하나로 돌릴 수 있는 secfunc 항목 전부(20개). 통합 실행
+  SSH로 붙는 admin 계정 하나로 돌릴 수 있는 secfunc 항목 전부(21개). 통합 실행
   (scripts/run_secfunc.py)의 switch-ssh 단계이며, 단독으로도 돌릴 수 있음:
 
     switchtest run --device admin --suite suites/secfunc_all_ssh.yaml
@@ -48,6 +48,7 @@ tests:
   - ../testcases/secfunc/check_webview_tls_version.yaml
   - ../testcases/secfunc/check_webview_tls11_rejected.yaml
   - ../testcases/secfunc/check_ssh_legacy_rejected.yaml
+  - ../testcases/secfunc/check_sftp_usertable_blocked.yaml
   # 8.x 감사
   # 외부 로그서버 설정(TC-AU-842)은 `show swlog` 설정 출력만 보므로 여기 남음.
   # swlog 본문을 읽어야 하는 TC-AU-811/821/831은 콘솔로 감.

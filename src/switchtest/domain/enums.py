@@ -21,6 +21,7 @@ class ValidationType(str, Enum):
     WEB_TLS_RESTRICTED_UNREACHABLE = "web_tls_restricted_unreachable"
     SSH_LEGACY_REJECTED = "ssh_legacy_rejected"
     SSH_SESSION_EXPIRES = "ssh_session_expires"
+    SFTP_DOWNLOAD_BLOCKED = "sftp_download_blocked"
 
 
 class TransportProtocol(str, Enum):

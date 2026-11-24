@@ -82,6 +82,8 @@ class ValidationStep(BaseModel):
     max_retries: int = 1
     # For api_unreachable: the HTTP path to request. Keep it credential-free --
     # a request to the auth endpoint would count as a login attempt.
+    # For sftp_download_blocked: the remote file path to attempt to GET
+    # instead (there is no meaningful default, unlike "/" for a URL).
     path: str = "/"
     oid: Optional[str] = None
     value: Optional[str] = None
@@ -133,6 +135,9 @@ class ValidationStep(BaseModel):
     # allows only one session per account across every transport, and the
     # driver already holds one open as whichever account is running this
     # testcase.
+    #
+    # Also used by sftp_download_blocked, for the same reason: the account
+    # attempting the download is never the driver's own session.
     session_username: Optional[str] = None
     session_password: Optional[str] = None
     # How long to sit idle before trying the session again. Comfortably past

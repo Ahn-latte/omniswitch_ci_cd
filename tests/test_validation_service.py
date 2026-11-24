@@ -369,6 +369,79 @@ def test_ssh_session_expires_requires_a_session_username() -> None:
         )
 
 
+def test_sftp_download_blocked_passes_when_nothing_is_retrieved(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_sftp_download_blocked",
+        lambda host, port, username, password, remote_path, timeout: (
+            True,
+            "winscp.com exited 1, no file retrieved",
+        ),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="userTable blocked",
+            type=ValidationType.SFTP_DOWNLOAD_BLOCKED,
+            target="192.0.2.1",
+            session_username="wsftpread",
+            session_password="x",
+            path="/flash/system/userTable11",
+        ),
+    )
+    assert result.status == ResultStatus.PASS
+
+
+def test_sftp_download_blocked_fails_when_the_file_is_retrieved(monkeypatch) -> None:
+    monkeypatch.setattr(
+        validation_service_module,
+        "check_sftp_download_blocked",
+        lambda host, port, username, password, remote_path, timeout: (
+            False,
+            "downloaded 128 bytes",
+        ),
+    )
+    result = ValidationService().run_validation(
+        StubDriver(),
+        ValidationStep(
+            name="userTable blocked",
+            type=ValidationType.SFTP_DOWNLOAD_BLOCKED,
+            target="192.0.2.1",
+            session_username="wsftpread",
+            session_password="x",
+            path="/flash/system/userTable11",
+        ),
+    )
+    assert result.status == ResultStatus.FAIL
+
+
+def test_sftp_download_blocked_requires_a_session_username() -> None:
+    with pytest.raises(ValidationExecutionError, match="session_username"):
+        ValidationService().run_validation(
+            StubDriver(),
+            ValidationStep(
+                name="userTable blocked",
+                type=ValidationType.SFTP_DOWNLOAD_BLOCKED,
+                target="192.0.2.1",
+                path="/flash/system/userTable11",
+            ),
+        )
+
+
+def test_sftp_download_blocked_requires_a_path() -> None:
+    with pytest.raises(ValidationExecutionError, match="path"):
+        ValidationService().run_validation(
+            StubDriver(),
+            ValidationStep(
+                name="userTable blocked",
+                type=ValidationType.SFTP_DOWNLOAD_BLOCKED,
+                target="192.0.2.1",
+                session_username="wsftpread",
+                session_password="x",
+            ),
+        )
+
+
 def test_port_scan_closed_passes_when_nothing_is_open(monkeypatch) -> None:
     monkeypatch.setattr(
         validation_service_module,
