@@ -16,6 +16,10 @@ from switchtest.exceptions import ValidationExecutionError
 
 WINSCP_EXECUTABLE = "winscp.com"
 
+# Printed by the script between `open` and `get`; its presence in the output
+# is what proves the session authenticated before the `get` was refused.
+SESSION_OPEN_MARKER = "SWITCHTEST-SFTP-SESSION-OPEN"
+
 # The installer doesn't add itself to PATH, so `shutil.which` alone misses a
 # perfectly normal install. Checked in order, first match wins.
 _DEFAULT_INSTALL_DIRS = (
@@ -59,11 +63,20 @@ def check_sftp_download_blocked(
     the switch presents without pinning it first, matching this project's
     non-strict default elsewhere (`strict_host_key`).
 
-    Returns (blocked, detail). True means the download did not go through --
-    a non-zero exit and no file landed locally, which is what "even this
+    The script echoes a marker right after `open`, and only a failure that
+    comes *after* that marker counts as the download being blocked. Under
+    `option batch abort` the first failing command ends the script, so
+    without the marker a refused login, a closed port, an account not allowed
+    to use SFTP, or a host-key/protocol failure all exit non-zero exactly
+    like a refused `get` -- and the check would "prove" the file is protected
+    without ever having asked for it. A failure before the marker raises
+    instead: the restriction was not tested.
+
+    Returns (blocked, detail). True means the session opened and the `get`
+    then failed with no file landing locally -- what "even this
     authenticated account cannot pull this file" looks like. False means the
-    file was actually retrieved (or the result was too ambiguous to call
-    blocked, which must not be mistaken for the switch actually refusing).
+    file was actually retrieved, or the result was too ambiguous to call
+    blocked (which must not be mistaken for the switch actually refusing).
     """
     if not host:
         raise ValidationExecutionError("SFTP download-blocked validation requires a target")
@@ -91,6 +104,7 @@ def check_sftp_download_blocked(
             "option confirm off\n"
             f'open sftp://{host}:{port} -hostkey="*" -username="{username}" '
             f'-password="{password}" -timeout={timeout}\n'
+            f"echo {SESSION_OPEN_MARKER}\n"
             f'get "{remote_path}" "{local_target}"\n'
             "exit\n",
             encoding="utf-8",
@@ -115,6 +129,13 @@ def check_sftp_download_blocked(
             return False, (
                 f"downloaded {local_target.stat().st_size} bytes of '{remote_path}' as "
                 f"'{username}' -- the file was retrievable"
+            )
+        if SESSION_OPEN_MARKER not in output:
+            raise ValidationExecutionError(
+                f"Could not open an SFTP session as '{username}' at all (exit "
+                f"{result.returncode}: {detail_tail}) -- the download restriction on "
+                f"'{remote_path}' was never tested. Check the account exists, is allowed "
+                f"SSH/SFTP, and that the password is right."
             )
         if result.returncode != 0:
             return True, (

@@ -330,7 +330,7 @@ def test_ssh_session_expires_passes_when_the_session_is_no_longer_usable(monkeyp
     monkeypatch.setattr(
         validation_service_module,
         "check_ssh_session_expires",
-        lambda host, port, username, password, idle_seconds, timeout: (
+        lambda host, port, username, password, idle_seconds, timeout, keepalive: (
             True,
             "session was reset to a login prompt",
         ),
@@ -352,7 +352,7 @@ def test_ssh_session_expires_fails_when_the_session_survives(monkeypatch) -> Non
     monkeypatch.setattr(
         validation_service_module,
         "check_ssh_session_expires",
-        lambda host, port, username, password, idle_seconds, timeout: (
+        lambda host, port, username, password, idle_seconds, timeout, keepalive: (
             False,
             "session was still usable",
         ),
@@ -368,6 +368,36 @@ def test_ssh_session_expires_fails_when_the_session_survives(monkeypatch) -> Non
         ),
     )
     assert result.status == ResultStatus.FAIL
+
+
+def test_ssh_session_expires_keeps_the_drivers_own_session_alive(monkeypatch) -> None:
+    """The timeout under test applies to the driver's session too; the
+    keepalive handed to the probe must poke *that* session, or the cleanup
+    which restores the timeout runs against a dead one."""
+    shows: list[str] = []
+    driver = StubDriver()
+    original_run_show = driver.run_show
+    driver.run_show = lambda command, timeout=30, reauth=False: (
+        shows.append(command) or original_run_show(command, timeout, reauth)
+    )
+
+    def fake_check(host, port, username, password, idle_seconds, timeout, keepalive):
+        keepalive()
+        return True, "expired"
+
+    monkeypatch.setattr(validation_service_module, "check_ssh_session_expires", fake_check)
+    ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="ssh session expires",
+            type=ValidationType.SSH_SESSION_EXPIRES,
+            target="192.0.2.1",
+            session_username="sessiontest",
+            session_password="x",
+        ),
+    )
+
+    assert shows == ["show session config"]
 
 
 def test_ssh_session_expires_requires_a_session_username() -> None:

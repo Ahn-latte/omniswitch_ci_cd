@@ -312,6 +312,10 @@ class ValidationService:
             validation.session_password or "",
             idle_seconds=validation.idle_seconds,
             timeout=validation.timeout,
+            # The timeout under test applies to the driver's session too; keep
+            # it busy so it is still alive for the cleanup that restores the
+            # timeout. A read, so poking it repeatedly changes nothing.
+            keepalive=lambda: driver.run_show("show session config", timeout=validation.timeout),
         )
         return ValidationResult(
             name=validation.name,

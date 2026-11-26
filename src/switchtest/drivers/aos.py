@@ -267,34 +267,90 @@ class AOSSwitchDriver(BaseSwitchDriver):
         here), and the pattern built from it allows any prefix, which keeps
         this working across devices without configuring the alias anywhere.
 
-        The shell is always left again, including when a command in the
-        middle fails: a session stranded at a shell prompt breaks every
-        later step of the run, which then looks like an unrelated failure in
-        whatever testcase happens to come next -- and because that prompt
-        ends in "->" it would not even look stranded, it would look like a
-        CLI that has started answering very strangely.
+        Once inside, the shell is always left again, including when a
+        command in the middle fails: a session stranded at a shell prompt
+        breaks every later step of the run -- and because that prompt ends in
+        "->" it would not even look stranded, it would look like a CLI that
+        has started answering very strangely.
+
+        But `exit` is sent *only* once the shell prompt has actually been
+        seen. Entering is a separate step for exactly that reason: if `su`
+        was refused (a wrong super-user password, none set), the session is
+        still at the AOS CLI, where `exit` logs it out -- on the console that
+        leaves every later testcase talking to a login prompt.
         """
         transport = self._transport()
         shell_pattern = f"^.*{re.escape(shell_prompt)}\\s*$"
-        interactions: list[tuple[str, str, bool]] = []
-        if su_password:
-            interactions.append(("su", "Password:", False))
-            interactions.append((su_password, shell_pattern, True))
-        else:
-            interactions.append(("su", shell_pattern, False))
-        interactions.extend((command, shell_pattern, False) for command in commands)
+        entered = self._enter_su_shell(su_password, shell_prompt, timeout)
         try:
-            output = transport.send_interactive(interactions, timeout=timeout)
+            output = transport.send_interactive(
+                [(command, shell_pattern, False) for command in commands], timeout=timeout
+            )
         except Exception:
             # Best effort only, and deliberately not allowed to raise: an exit
             # that also fails must not replace the original error, which says
-            # far more about what actually went wrong.
+            # far more about what actually went wrong. Safe to send here --
+            # the shell prompt was confirmed before any command went out.
             try:
                 self._leave_su_shell(timeout)
             except Exception:
                 pass
             raise
         self._leave_su_shell(timeout)
+        return entered + output
+
+    def _enter_su_shell(self, su_password: str | None, shell_prompt: str, timeout: int) -> str:
+        """Get into the su shell, or raise without having left the CLI.
+
+        Every step waits for *either* outcome -- the next prompt it hopes for,
+        or the CLI prompt that a refusal returns to -- and then looks at which
+        one it got. Waiting for the hoped-for prompt alone would turn a
+        refusal into a timeout, with no way to tell afterwards whether the
+        session is in the shell (and needs `exit`) or at the CLI (where `exit`
+        logs it out).
+        """
+        transport = self._transport()
+        prompt = re.escape(self.device.expected_prompt or "->")
+        cli = rf"(?:[^#]*[^-#])?{prompt}"
+        shell = rf".*{re.escape(shell_prompt)}"
+        password = r".*[Pp]assword.*:"
+        shell_or_cli = rf"^(?:{shell}|{cli})\s*$"
+        output = ""
+        if su_password:
+            output = transport.send_interactive(
+                [("su", rf"^(?:{password}|{cli})\s*$", False)], timeout=timeout
+            )
+            if not _ends_at_password_prompt(output):
+                raise CommandExecutionError(
+                    f"'su' did not ask for a password, so the shell was not entered: "
+                    f"{output.strip() or '(no output)'}"
+                )
+            # A rejected password may be answered by asking again rather than
+            # by returning to the CLI, so that is an outcome to wait for too.
+            output += transport.send_interactive(
+                [(su_password, rf"^(?:{shell}|{cli}|{password})\s*$", True)], timeout=timeout
+            )
+            if _ends_at_password_prompt(output):
+                # Back out of the re-prompt with an empty entry -- nothing
+                # sensitive is typed, and it returns to the CLI rather than
+                # leaving the session parked at a password prompt.
+                try:
+                    transport.send_interactive(
+                        [("", self._cli_prompt_pattern_outside_su(), True)], timeout=timeout
+                    )
+                except Exception:
+                    pass
+                raise CommandExecutionError(
+                    "'su' asked for the password again -- the super-user password was "
+                    "refused, so the shell was not entered"
+                )
+        else:
+            output = transport.send_interactive([("su", shell_or_cli, False)], timeout=timeout)
+        if not _ends_at(output, shell):
+            raise CommandExecutionError(
+                f"'su' did not reach the shell prompt ('{shell_prompt}'), so the session is "
+                f"still at the CLI: {output.strip() or '(no output)'}"
+            )
         return output
 
     def _leave_su_shell(self, timeout: int) -> None:
@@ -363,6 +419,15 @@ class AOSSwitchDriver(BaseSwitchDriver):
                 f"{self.device.transport.value} transport is not connected"
             )
         return self.transport
+
+
+def _ends_at(text: str, prompt_body: str) -> bool:
+    """Whether the last non-empty line is, in full, a prompt matching
+    `prompt_body` (an unanchored regex body)."""
+    for line in reversed(text.splitlines()):
+        if line.strip():
+            return re.match(rf"^(?:{prompt_body})\s*$", line) is not None
+    return False
 
 
 def _ends_at_password_prompt(text: str) -> bool:

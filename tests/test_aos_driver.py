@@ -73,14 +73,28 @@ def _driver_with(transport) -> AOSSwitchDriver:
 
 
 class _RecordingSuShell:
-    """Records each send_interactive batch as the list of inputs it sent, so a
-    test can assert the whole dialogue (su, commands, exit) and its order."""
+    """Answers each send_interactive batch the way the device does, and
+    records the inputs and expected prompts of every batch so a test can
+    assert the whole dialogue (su, password, commands, exit) and its order.
 
-    def __init__(self, fail_on: str | None = None) -> None:
+    `su_answer` is what the password entry gets back: the shell ("enter"),
+    a refusal back at the CLI ("refuse"), or another password prompt
+    ("reprompt"). `asks_password=False` models `su` refusing outright."""
+
+    def __init__(
+        self,
+        fail_on: str | None = None,
+        su_answer: str = "enter",
+        asks_password: bool = True,
+        su_password: str | None = None,
+    ) -> None:
         self.batches: list[list[str]] = []
         self.patterns: list[list[str]] = []
         self.auth_password = "not-a-real-password"
         self._fail_on = fail_on
+        self._su_answer = su_answer
+        self._asks_password = asks_password
+        self._su_password = su_password
 
     def send_interactive(self, interactions, timeout: int = 30) -> str:
         inputs = [channel_input for channel_input, _prompt, _hidden in interactions]
@@ -88,6 +102,25 @@ class _RecordingSuShell:
         self.patterns.append([prompt for _input, prompt, _hidden in interactions])
         if self._fail_on is not None and self._fail_on in inputs:
             raise RuntimeError(f"timed out waiting after {self._fail_on!r}")
+        first = inputs[0]
+        if first == "su":
+            if not self._asks_password:
+                return "ERROR: su is not permitted\n-> "
+            # Whether the driver is waiting for a password prompt or for the
+            # shell itself is visible in the pattern it handed over.
+            if "assword" in interactions[0][1]:
+                return "Password: "
+            return "Entering maintenance shell.\nMEDORA #-> "
+        if first == "exit":
+            return "-> "
+        if first == "":
+            return "Authentication failure\n-> "
+        if self._su_password is not None and first == self._su_password:
+            return {
+                "enter": "Entering maintenance shell. Type 'exit' when you are done.\nMEDORA #-> ",
+                "refuse": "Authentication failure\n-> ",
+                "reprompt": "Authentication failure\nPassword: ",
+            }[self._su_answer]
         return (
             "-rw------- 1 root root 1675 Jan 1 00:05 /flash/system/ssh_host_rsa_key\n"
             "MEDORA #-> \n"
@@ -208,9 +241,9 @@ def test_su_shell_runs_the_commands_and_always_exits_back_to_the_cli() -> None:
     output = _driver_with(transport).run_in_su_shell(["ls -l /flash/system/ssh*"])
 
     assert "ssh_host_rsa_key" in output
-    # No su password configured, so no "Password:" step -- su goes straight to
-    # the shell prompt, then the command, then exit as its own batch.
-    assert transport.batches == [["su", "ls -l /flash/system/ssh*"], ["exit"]]
+    # No su password configured, so no "Password:" step. Entering is its own
+    # batch, so the shell prompt can be confirmed before anything else goes out.
+    assert transport.batches == [["su"], ["ls -l /flash/system/ssh*"], ["exit"]]
 
 
 def test_the_maintenance_shell_prompt_is_not_accepted_as_the_cli_prompt() -> None:
@@ -247,17 +280,64 @@ def test_su_shell_waits_for_the_device_prompt_tail_allowing_any_alias() -> None:
 
     _driver_with(transport).run_in_su_shell(["ls /flash/system"])
 
-    shell_pattern = transport.patterns[0][-1]
+    # The command batch waits on the shell pattern alone.
+    shell_pattern = transport.patterns[1][0]
     assert re.match(shell_pattern, "MEDORA #-> ")
     assert re.match(shell_pattern, "SOMEOTHERBOX #-> ")
 
 
 def test_su_shell_sends_the_password_when_one_is_configured() -> None:
-    transport = _RecordingSuShell()
+    transport = _RecordingSuShell(su_password="su-secret")
 
     _driver_with(transport).run_in_su_shell(["ls /flash/system"], su_password="su-secret")
 
-    assert transport.batches[0] == ["su", "su-secret", "ls /flash/system"]
+    assert transport.batches == [["su"], ["su-secret"], ["ls /flash/system"], ["exit"]]
+
+
+def test_a_refused_su_password_never_sends_exit() -> None:
+    """The regression: still at the AOS CLI after a refused `su`, an `exit`
+    logs the session out -- on the console, every later testcase then talks
+    to a login prompt."""
+    transport = _RecordingSuShell(su_password="wrong", su_answer="refuse")
+
+    try:
+        _driver_with(transport).run_in_su_shell(["ls /flash/system"], su_password="wrong")
+    except CommandExecutionError as exc:
+        assert "still at the CLI" in str(exc)
+    else:
+        raise AssertionError("a refused su should have raised")
+
+    assert ["exit"] not in transport.batches
+    assert ["ls /flash/system"] not in transport.batches
+
+
+def test_su_that_never_asks_for_a_password_never_sends_it_or_exit() -> None:
+    transport = _RecordingSuShell(asks_password=False, su_password="su-secret")
+
+    try:
+        _driver_with(transport).run_in_su_shell(["ls /flash/system"], su_password="su-secret")
+    except CommandExecutionError as exc:
+        assert "did not ask for a password" in str(exc)
+    else:
+        raise AssertionError("su refusing outright should have raised")
+
+    assert transport.batches == [["su"]]
+
+
+def test_a_reprompt_backs_out_with_an_empty_entry_and_never_sends_exit() -> None:
+    """A device that answers a wrong password by asking again must not be left
+    parked at that prompt -- nor answered with `exit`, which would be taken as
+    another password attempt."""
+    transport = _RecordingSuShell(su_password="wrong", su_answer="reprompt")
+
+    try:
+        _driver_with(transport).run_in_su_shell(["ls /flash/system"], su_password="wrong")
+    except CommandExecutionError as exc:
+        assert "asked for the password again" in str(exc)
+    else:
+        raise AssertionError("a re-prompted su should have raised")
+
+    assert transport.batches == [["su"], ["wrong"], [""]]
 
 
 def test_su_shell_exits_even_when_a_command_fails() -> None:

@@ -65,9 +65,23 @@ def check_tls_restricted_unreachable(
     attempt (and fail) a downgraded handshake instead of just ignoring the
     request.
 
-    Returns (unreachable, detail): True means the handshake failed (matches
-    a switch that requires TLS 1.2+), False means it succeeded (the switch
-    accepted the downgraded version).
+    A control navigation runs first, with Firefox's default TLS range (which
+    includes 1.2). Without it, *any* navigation failure would read as "the
+    downgraded handshake was refused" -- WebView admin-disabled, port 443
+    closed, the host unreachable from this PC -- and the check would pass on
+    a switch it never actually reached. If the control can't load the page,
+    this raises instead: the TLS restriction was not tested.
+
+    The pinned failure is then accepted whatever its error text, rather than
+    only on a TLS-specific code: with the control having just loaded the same
+    URL, the TLS range is the only thing that changed, and the exact string
+    Playwright surfaces for a Firefox protocol-version failure is not
+    something worth betting a false FAIL on. The text is kept in the detail.
+
+    Returns (unreachable, detail): True means the pinned handshake failed
+    while the unpinned one worked (a switch that refuses that version),
+    False means the pinned one also succeeded (the switch accepted the
+    downgraded version).
     """
     if not target:
         raise ValidationExecutionError("TLS-restricted web check requires a target")
@@ -88,14 +102,14 @@ def check_tls_restricted_unreachable(
         ) from exc
     pin = _FIREFOX_TLS_VERSION_PREF[tls_version]
     url = f"https://{target}:{port}/"
-    with sync_playwright() as playwright:
+    navigation_errors = (PlaywrightError, PlaywrightTimeoutError)
+
+    def navigate(prefs: dict | None) -> Exception | None:
+        """Load `url` in a Firefox launched with `prefs`; the navigation
+        error, or None if the page loaded. Prefs are per-launch, hence a
+        browser per attempt."""
         try:
-            browser = playwright.firefox.launch(
-                firefox_user_prefs={
-                    "security.tls.version.min": pin,
-                    "security.tls.version.max": pin,
-                }
-            )
+            browser = playwright.firefox.launch(firefox_user_prefs=prefs or {})
         except Exception as exc:
             raise ValidationExecutionError(
                 f"Could not launch Firefox (run `playwright install firefox`): {exc}"
@@ -104,13 +118,29 @@ def check_tls_restricted_unreachable(
             page = browser.new_page(ignore_https_errors=True)
             try:
                 page.goto(url, timeout=timeout * 1000)
-            except (PlaywrightError, PlaywrightTimeoutError) as exc:
-                return True, (
-                    f"Navigation to {url} pinned to TLS {tls_version} failed as expected: {exc}"
-                )
-            return False, (
-                f"Navigation to {url} pinned to TLS {tls_version} succeeded "
-                f"(the switch accepted a downgraded handshake)"
-            )
+            except navigation_errors as exc:
+                return exc
+            return None
         finally:
             browser.close()
+
+    with sync_playwright() as playwright:
+        control_error = navigate(None)
+        if control_error is not None:
+            raise ValidationExecutionError(
+                f"Could not load {url} even with Firefox's default TLS range (which allows "
+                f"1.2) -- WebView is down or unreachable from here, so the TLS {tls_version} "
+                f"restriction was never tested: {control_error}"
+            )
+        pinned_error = navigate(
+            {"security.tls.version.min": pin, "security.tls.version.max": pin}
+        )
+    if pinned_error is not None:
+        return True, (
+            f"{url} loaded with the default TLS range but failed when pinned to TLS "
+            f"{tls_version}: {pinned_error}"
+        )
+    return False, (
+        f"Navigation to {url} pinned to TLS {tls_version} succeeded "
+        f"(the switch accepted a downgraded handshake)"
+    )
