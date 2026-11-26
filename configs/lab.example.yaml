@@ -10,6 +10,11 @@ switch:
   # 장비의 `system name`. TC-SM-43이 SNMP로 sysName을 썼다가 이 값으로 복원함.
   system_name: OS6900
   expected_firmware: "8.10.86.R04"
+  # 업그레이드 *이전* 버전. TC-SM-443이 swlog의 업그레이드 기록에 이전/이후 버전이
+  # 모두 남았는지 확인하는 데만 쓰임 - 실제로 업그레이드를 거친 장비만 값이 있으므로
+  # 비워두면 그 테스트케이스는 $previous_firmware 가 치환되지 않아 에러로 끝남
+  # (조용히 통과하는 것보다 나음).
+  # previous_firmware: "8.9.221.R03"
   expected_prompt: "->"
   # TC-FC-312가 테스트용 VLAN에 넣었다 빼는 포트. 섀시마다 포트 번호가
   # 다르며, 없는 포트를 쓰면 "ERROR: Invalid Port"로 끝남.

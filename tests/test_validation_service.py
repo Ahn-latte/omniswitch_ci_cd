@@ -23,6 +23,8 @@ class StubDriver:
         # loud rather than silently returning some default.
         self.login_attempts: list[tuple[str, str]] = []
         self.login_result: bool | None = None
+        self.su_shell_calls: list[tuple[list[str], str | None, str]] = []
+        self.su_shell_output: str | None = None
 
     def run_show(self, command: str, timeout: int = 30, reauth: bool = False) -> str:
         if command == "show vlan":
@@ -34,6 +36,17 @@ class StubDriver:
         if self._events is not None:
             self._events.append("triggered")
         return list(commands)
+
+    def run_in_su_shell(
+        self,
+        commands,
+        su_password: str | None = None,
+        shell_prompt: str = "#",
+        timeout: int = 30,
+    ) -> str:
+        self.su_shell_calls.append((list(commands), su_password, shell_prompt))
+        assert self.su_shell_output is not None, "test did not set StubDriver.su_shell_output"
+        return self.su_shell_output
 
     def attempt_login(self, username: str, password: str, timeout: int = 15) -> bool:
         self.login_attempts.append((username, password))
@@ -438,6 +451,111 @@ def test_sftp_download_blocked_requires_a_path() -> None:
                 target="192.0.2.1",
                 session_username="wsftpread",
                 session_password="x",
+            ),
+        )
+
+
+LS_TWO_KEYS = """ls -l /flash/system/ssh*
+-rw-------    1 root     root          1675 Jan  1 00:05 /flash/system/ssh_host_rsa_key
+-rw-r--r--    1 root     root           382 Jan  1 00:05 /flash/system/ssh_host_rsa_key.pub
+#
+"""
+
+LS_NO_SUCH_FILE = """ls -l /flash/system/ssh*
+ls: /flash/system/ssh*: No such file or directory
+#
+"""
+
+
+def test_su_shell_files_exist_passes_when_enough_files_are_listed() -> None:
+    driver = StubDriver()
+    driver.su_shell_output = LS_TWO_KEYS
+
+    result = ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="ssh keys present",
+            type=ValidationType.SU_SHELL_FILES_EXIST,
+            path="/flash/system/ssh*",
+            min_matches=2,
+        ),
+    )
+
+    assert result.status == ResultStatus.PASS
+    assert "ssh_host_rsa_key" in result.observed
+    # `#->` by default, not `#`: the device prompts "MEDORA #-> ", so a bare
+    # `#` would wait for a prompt line that never ends there.
+    assert driver.su_shell_calls == [(["ls -l /flash/system/ssh*"], None, "#->")]
+
+
+def test_su_shell_files_exist_fails_when_the_glob_matches_nothing() -> None:
+    """`ls` reports a missing glob on stdout and the buffer still comes back
+    looking like output, so the count has to come from parsed entries rather
+    than from "did anything get printed"."""
+    driver = StubDriver()
+    driver.su_shell_output = LS_NO_SUCH_FILE
+
+    result = ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="ssh keys present",
+            type=ValidationType.SU_SHELL_FILES_EXIST,
+            path="/flash/system/ssh*",
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "No such file" in result.observed
+
+
+def test_su_shell_files_exist_fails_on_a_half_generated_key_set() -> None:
+    driver = StubDriver()
+    driver.su_shell_output = (
+        "ls -l /flash/system/ssh*\n"
+        "-rw-------    1 root     root          1675 Jan  1 00:05 /flash/system/ssh_host_rsa_key\n"
+        "#\n"
+    )
+
+    result = ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="ssh keys present",
+            type=ValidationType.SU_SHELL_FILES_EXIST,
+            path="/flash/system/ssh*",
+            min_matches=2,
+        ),
+    )
+
+    assert result.status == ResultStatus.FAIL
+    assert "listed 1 file(s)" in result.message
+
+
+def test_su_shell_files_exist_passes_the_su_password_and_prompt_through() -> None:
+    driver = StubDriver()
+    driver.su_shell_output = LS_TWO_KEYS
+
+    ValidationService().run_validation(
+        driver,
+        ValidationStep(
+            name="ssh keys present",
+            type=ValidationType.SU_SHELL_FILES_EXIST,
+            path="/flash/system/ssh*",
+            su_password="su-secret",
+            shell_prompt="bash-4.3#",
+            min_matches=2,
+        ),
+    )
+
+    assert driver.su_shell_calls == [(["ls -l /flash/system/ssh*"], "su-secret", "bash-4.3#")]
+
+
+def test_su_shell_files_exist_requires_a_path() -> None:
+    with pytest.raises(ValidationExecutionError, match="path"):
+        ValidationService().run_validation(
+            StubDriver(),
+            ValidationStep(
+                name="ssh keys present",
+                type=ValidationType.SU_SHELL_FILES_EXIST,
             ),
         )
 

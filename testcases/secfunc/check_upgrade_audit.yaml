@@ -1,0 +1,46 @@
+id: TC-SM-443
+name: Firmware upgrade is audited with both the old and the new version
+description: >-
+  펌웨어 업그레이드 기록이 감사로그(show log swlog | grep -i upgrade)에 남고, 그 기록에
+  업그레이드 *이전* 버전과 *이후* 버전이 모두 보이는지 확인. 버전 하나만 남으면 "무엇에서
+  무엇으로 올렸는지"를 사후에 재구성할 수 없어서 감사 기록으로서 불완전함 - TC-SM-441은
+  현재 적재된 버전이 무엇인지(show microcode)만 보고, 어떤 버전에서 왔는지는 전혀 보지
+  않으므로 그건 이 시험만 증명함.
+
+  반드시 --device secureadmin 으로 실행할 것 - swlog 열람에 secureadmin 권한이 필요함.
+
+  lab.yaml 의 switch.previous_firmware 가 반드시 설정돼 있어야 함(기본은 주석 처리된
+  상태). 비워두면 $previous_firmware 가 치환되지 않아 이 시험이 실패하는데, 그건
+  의도된 동작임 - 비교할 이전 버전을 모르는 채로 조용히 통과하는 것보다 나음.
+
+  주의: 업그레이드를 한 번도 하지 않은 장비(공장 초기화 직후 등)에는 애초에 업그레이드
+  로그가 없으므로 이 시험은 실패함. 그건 결함이 아니라 전제 미충족이며, 그런 장비에서는
+  이 시험을 스위트에서 빼야 함. 또 swlog는 순환 버퍼라, 업그레이드 이후 로그가 많이
+  쌓여 해당 기록이 밀려났으면 역시 실패함 - 그 경우 정말 기록이 없었던 것인지
+  밀려난 것인지는 show log swlog 를 직접 확인해 판단할 것.
+feature: system
+tags: [secfunc, mgmt, audit, secureadmin, console]
+severity: medium
+setup: []
+validations:
+  - name: 감사로그에 업그레이드 기록 존재
+    type: regex
+    command: show log swlog | grep -i upgrade
+    pattern: '[Uu]pgrade'
+    timeout: 90
+    reauth: true
+  - name: 업그레이드 기록에 이후(현재) 버전이 남음
+    type: contains
+    command: show log swlog | grep -i upgrade
+    expected: "$expected_firmware"
+    timeout: 90
+    reauth: true
+  - name: 업그레이드 기록에 이전 버전이 남음
+    type: contains
+    command: show log swlog | grep -i upgrade
+    expected: "$previous_firmware"
+    timeout: 90
+    reauth: true
+cleanup: []
+continue_on_failure: false
+timeout: 300

@@ -141,6 +141,35 @@ class ExecutionService:
                 else:
                     command_log.append(f"ENSURE_UNLOCKED {username}: already unlocked")
                 continue
+            if step.action in (
+                TestAction.SET_SUPER_USER_PASSWORD,
+                TestAction.RESET_SUPER_USER_PASSWORD,
+            ):
+                label = step.action.value.upper()
+                password = step.password or ""
+                if not password:
+                    raise CommandExecutionError(f"{step.action.value} requires a password")
+                if context.dry_run:
+                    command_log.append(f"DRY_RUN {step.action.value}")
+                    continue
+                try:
+                    if step.action == TestAction.SET_SUPER_USER_PASSWORD:
+                        self.driver.set_super_user_password(password, entries=step.password_entries)
+                    else:
+                        self.driver.reset_super_user_password(password)
+                except CommandExecutionError as exc:
+                    # Only a refusal is forgiven -- e.g. a reset with nothing
+                    # set to remove, which is a perfectly good starting
+                    # state. A timeout (a wrong `password_entries`, say)
+                    # raises a different type and still propagates, because
+                    # that one really is broken.
+                    if not step.ignore_errors:
+                        raise
+                    command_log.append(f"{label} rejected, ignored: {exc}")
+                    continue
+                # Never the password itself -- the command log is reported.
+                command_log.append(f"{label} ok")
+                continue
             if step.action == TestAction.TRIGGER_FAILED_LOGINS:
                 username = step.username or ""
                 if not username:

@@ -1,6 +1,6 @@
 name: secfunc_console
 description: >-
-  시리얼 콘솔(secureadmin)로 돌리는 secfunc 항목(14개). 반드시
+  시리얼 콘솔(secureadmin)로 돌리는 secfunc 항목(16개). 반드시
   --device secureadmin 으로 실행:
 
     switchtest run --device secureadmin --suite suites/secfunc_console.yaml
@@ -44,11 +44,17 @@ tests:
   # 4.x 보안 관리 - SNMP는 네트워크(UDP/161)가 살아 있어야 하므로 파괴적 항목보다 앞
   - ../testcases/secfunc/check_snmpv3_account_station.yaml
   - ../testcases/secfunc/check_snmpv3_get_set_permissions.yaml
+  # 업그레이드 감사 기록(이전/이후 버전) - swlog 읽기. lab.yaml 에
+  # switch.previous_firmware 가 설정돼 있어야 하고, 업그레이드를 거친 장비여야 함.
+  - ../testcases/secfunc/check_upgrade_audit.yaml
   # 5.x 자체시험 - 부팅 시 결과는 swlog 에만 남음
   - ../testcases/secfunc/check_boot_hw_selftest.yaml
   - ../testcases/secfunc/check_boot_process_selftest.yaml
   - ../testcases/secfunc/check_boot_integrity.yaml
   - ../testcases/secfunc/check_config_integrity.yaml
+  # 7.x 데이터 보호 - SSH 키 재료는 /flash/system 에 있고, 그 디렉터리는 일반 CLI나
+  # SFTP로는 닿지 않아서 su 셸로만 확인 가능함
+  - ../testcases/secfunc/check_ssh_host_keys_present.yaml
   # 8.x 감사 - swlog 본문 읽기
   - ../testcases/secfunc/check_audit_generation.yaml
   - ../testcases/secfunc/check_audit_fields.yaml

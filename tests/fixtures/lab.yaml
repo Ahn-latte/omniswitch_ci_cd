@@ -5,6 +5,7 @@ switch:
   host: 192.0.2.1
   system_name: OS6900
   expected_firmware: "8.10.86.R04"
+  previous_firmware: "8.9.221.R03"
   expected_prompt: "->"
 
 console:

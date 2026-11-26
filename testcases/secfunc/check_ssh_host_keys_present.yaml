@@ -1,0 +1,81 @@
+id: TC-DP-711B
+name: SSH host keys exist on flash (su shell)
+description: >-
+  TC-DP-711이 "SSH 서비스가 켜져 있고 Force-SSL이 걸려 있다"는 설정을 보는 데 그치는 것에
+  대해, 그 암호통신 채널이 실제로 쓰는 키 재료(/flash/system/ssh*)가 장비에 생성되어
+  있는지를 파일 수준에서 확인함. 키가 없으면 SSH 서비스가 Enabled로 보이더라도 실제
+  핸드셰이크는 성립할 수 없으므로, 설정 확인만으로는 메울 수 없는 간극임.
+
+  su 셸을 쓰는 이유: AOS는 /flash/system 을 일반 CLI의 파일 명령에서도, SFTP에서도
+  닿지 않게 막아둠(그 차단 자체는 TC-DP-718이 userTable로 증명함). 그래서 그 안을
+  들여다볼 수 있는 경로는 su 셸뿐임. 검증이 끝나면 항상 exit로 CLI 프롬프트로
+  복귀함 - 셸에 걸린 채 끝나면 그 뒤에 오는 모든 단계가 엉뚱한 이유로 실패함.
+
+  su 에는 비밀번호가 필요하고, 그 비밀번호는 계정 비밀번호와 별개로
+  super-user-password 명령으로 관리함:
+    -> super-user-password set
+    Enter super-user password:   *********
+    Reenter super-user password: *********       (password_entries: 2)
+    The super-user password was set successfully.
+
+    -> super-user-password reset                  (설정을 아예 없앰)
+    Enter old super-user password:   *********
+    The super-user password was reset successfully.
+
+  그래서 setup 에서 set 으로 랩 공용 값($test_password)을 설정하고, cleanup 에서
+  reset 으로 걷어내 장비를 처음 상태로 돌림.
+
+  cleanup 의 reset 이 ignore_errors 인 이유: 이 프레임워크에서 cleanup 실패는 장비를
+  UNSAFE 로 표시하고 스위트의 나머지(이 스위트 끝의 IP 차단 등)를 멈춤. setup 의 set 이
+  실패해 우리가 아무것도 설정하지 않은 경우에도 cleanup reset 은 당연히 거부되는데,
+  그걸로 스위트 전체를 멈추는 것은 과함. 거부 내용은 그대로 command_log(리포트)에 남음.
+  ignore_errors 는 "장비가 거부했다"만 용서하고 타임아웃은 용서하지 않음.
+
+  주의: 이전 실행이 cleanup 없이 중단돼 super-user 비밀번호가 남아 있으면 set 이
+  거부될 수 있음. 그 경우 콘솔에서 super-user-password reset 으로 지운 뒤 다시 돌릴 것.
+
+  드라이버는 명령을 먼저 보내고, 응답이 실제로 비밀번호를 물었을 때만 비밀번호를
+  입력함 - 묻지 않고 바로 거부하는 경우 고정 대본이면 오지 않을 프롬프트를 기다리다
+  타임아웃이 나거나, 기다리지 않으면 비밀번호를 CLI 명령으로 쳐서 swlog 에 남기게 됨.
+
+  실제 대화는 이렇게 생김:
+    -> su
+    Password:
+    Entering maintenance shell. Type 'exit' when you are done.
+    MEDORA #->
+  shell_prompt 에 `MEDORA #->` 전체가 아니라 `#->` 꼬리만 적는 이유: 앞부분은 장비마다
+  다른 alias 이고, 패턴이 앞에 무엇이 붙든 허용하므로 alias를 어디에도 적어두지 않고
+  장비 간 이식됨.
+
+  주의(코드 쪽 함의): 이 셸 프롬프트는 `->` 로 끝나서 일반 CLI 프롬프트 패턴에도 걸림
+  ("MEDORA #" 가 그 패턴의 `.*[^-]` 에 맞음). 그래서 exit 후 "CLI로 돌아왔는지"를
+  일반 패턴으로는 확인할 수 없고(셸 안에서도 이미 참), 드라이버는 `#` 를 배제한
+  별도 패턴으로 확인함. 셸에 갇힌 세션이 CLI인 척 명령을 계속 받아먹는 것이 이
+  검증에서 가장 조용하고 위험한 실패 양상이라서임.
+
+  min_matches 가 2인 이유: 키 한 쌍(개인키 + .pub)이 최소 단위이므로, 하나만 있는
+  반쪽 생성 상태를 통과시키지 않기 위함. 이 장비에 생성되는 키 종류가 더 많으면
+  (rsa/dsa/ecdsa/ed25519 등) 그 수에 맞춰 올릴 것.
+
+  반드시 --device secureadmin 으로 실행할 것 - su 진입 권한이 필요함.
+feature: system
+tags: [secfunc, transport, dataprotection, secureadmin, console]
+severity: high
+setup:
+  - action: set_super_user_password
+    password: $test_password
+    password_entries: 2
+validations:
+  - name: /flash/system/ssh* 키 파일이 존재함
+    type: su_shell_files_exist
+    path: /flash/system/ssh*
+    su_password: $test_password
+    shell_prompt: "#->"
+    min_matches: 2
+    timeout: 30
+cleanup:
+  - action: reset_super_user_password
+    password: $test_password
+    ignore_errors: true
+continue_on_failure: false
+timeout: 120

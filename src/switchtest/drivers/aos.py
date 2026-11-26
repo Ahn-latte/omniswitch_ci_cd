@@ -14,6 +14,12 @@ from switchtest.infrastructure.ssh.prompt import PASSWORD_PROMPT_PATTERN, is_pas
 
 DriverTransport = SSHTransport | SerialConsoleTransport
 
+# Matched by shape rather than exact wording: "Enter new password:", "Retype
+# new password:", "Confirm super user password:" all differ by firmware but
+# all end the same way. Anchored because scrapli only treats a pattern as a
+# regex when it starts with ^ and ends with $.
+SUPER_USER_PASSWORD_PROMPT = r"^.*[Pp]assword.*:\s*$"
+
 
 class AOSSwitchDriver(BaseSwitchDriver):
     def __init__(self, device: DeviceDefinition) -> None:
@@ -96,24 +102,50 @@ class AOSSwitchDriver(BaseSwitchDriver):
         retry_output = self._transport().send_command(command, timeout=timeout)
         return _clean_show_output(retry_output, command)
 
+    def _cli_prompt_pattern(self) -> str:
+        """The anchored pattern that matches only the trailing CLI prompt line.
+
+        scrapli only treats a pattern as a (multiline) regex when it starts
+        with ^ and ends with $; anything else is matched as a bare substring.
+        A bare "->" would match the "--->" arrows that pepper swlog output
+        (e.g. "Process ---> Ok"), cutting the read off at the first such line
+        and dropping everything after it. Anchoring makes it match only the
+        trailing CLI prompt line.
+
+        Anchoring alone is not enough, because readers match against the
+        buffer as it accumulates and `$` also matches at end-of-string: a
+        chunk boundary landing right after "... CPU Status --->" (before
+        " Ok" arrives) makes "^.*->$" match a half-read line and truncate the
+        output. That is a constant hazard on the 115200 serial console. So
+        also require the character before the prompt not to be part of an
+        arrow -- "->" and "OS6900->" still match, "--->" no longer does.
+        """
+        prompt = self.device.expected_prompt or "->"
+        return f"^(?:.*[^-])?{re.escape(prompt)}\\s*$"
+
+    def _cli_prompt_pattern_outside_su(self) -> str:
+        """`_cli_prompt_pattern`, narrowed so the maintenance shell's own
+        prompt cannot satisfy it.
+
+        The su shell prompts with "<alias> #-> " -- which ends in "->" and so
+        matches the ordinary CLI pattern too ("MEDORA #" is a legal match for
+        that pattern's `.*[^-]`). That makes "did `exit` get us back to the
+        CLI?" unanswerable with the ordinary pattern: it is already true
+        inside the shell. Worse, a session accidentally left in the shell
+        would then keep answering every later send_command as if it were the
+        CLI, quietly running those commands in the Linux shell instead.
+
+        Excluding `#` from the prompt line separates the two: "ACSW01-> " and
+        "-> " still match, "MEDORA #-> " no longer does. AOS system names
+        don't contain `#`, and an swlog line that does is one fewer false
+        prompt match -- so narrowing costs nothing here.
+        """
+        prompt = self.device.expected_prompt or "->"
+        return f"^(?:[^#]*[^-#])?{re.escape(prompt)}\\s*$"
+
     def _run_show_with_reauth(self, command: str, timeout: int) -> str:
         transport = self._transport()
-        prompt = self.device.expected_prompt or "->"
-        # Anchor the completion prompt to a whole line. scrapli only treats a
-        # pattern as a (multiline) regex when it starts with ^ and ends with $;
-        # anything else is matched as a bare substring. A bare "->" would match
-        # the "--->" arrows that pepper swlog output (e.g. "Process ---> Ok"),
-        # cutting the read off at the first such line and dropping everything
-        # after it. Anchoring makes it match only the trailing CLI prompt line.
-        #
-        # Anchoring alone is not enough, because readers match against the
-        # buffer as it accumulates and `$` also matches at end-of-string: a
-        # chunk boundary landing right after "... CPU Status --->" (before
-        # " Ok" arrives) makes "^.*->$" match a half-read line and truncate the
-        # output. That is a constant hazard on the 115200 serial console. So
-        # also require the character before the prompt not to be part of an
-        # arrow -- "->" and "OS6900->" still match, "--->" no longer does.
-        prompt_pattern = f"^(?:.*[^-])?{re.escape(prompt)}\\s*$"
+        prompt_pattern = self._cli_prompt_pattern()
         output = transport.send_interactive(
             [
                 (command, "Password:", False),
@@ -133,6 +165,151 @@ class AOSSwitchDriver(BaseSwitchDriver):
             if any(marker in output.lower() for marker in ["invalid input", "incomplete command", "error"]):
                 raise CommandExecutionError(f"Device rejected configuration command: {output}")
         return outputs
+
+    def set_super_user_password(self, password: str, entries: int = 2, timeout: int = 30) -> str:
+        """Drive `super-user-password set` -- the dialogue that gives `su` a
+        password to ask for. As the device prints it:
+
+            -> super-user-password set
+            Enter super-user password:   *********
+            Reenter super-user password: *********
+            The super-user password was set successfully.
+
+        `entries` is how many times it asks (2 above). A parameter rather
+        than a constant because getting it wrong does not fail cleanly: one
+        entry too few leaves the session sitting at a password prompt, and one
+        too many sends the password to the CLI as a command, which puts it in
+        swlog.
+        """
+        return self._super_user_password_dialogue(
+            "super-user-password set", password, entries, timeout
+        )
+
+    def reset_super_user_password(self, old_password: str, timeout: int = 30) -> str:
+        """Drive `super-user-password reset`, which removes the password
+        altogether (not "changes it") and asks for the current one first:
+
+            -> super-user-password reset
+            Enter old super-user password:   *********
+            The super-user password was reset successfully.
+        """
+        return self._super_user_password_dialogue(
+            "super-user-password reset", old_password, 1, timeout
+        )
+
+    def _super_user_password_dialogue(
+        self, command: str, password: str, entries: int, timeout: int
+    ) -> str:
+        """Send `command`, and only then decide whether there is a dialogue.
+
+        The first prompt cannot be assumed. `reset` with no password set, or
+        `set` with one already there, very plausibly answers with a one-line
+        refusal and goes straight back to the CLI -- never asking for
+        anything. A fixed script would then wait for a password prompt that
+        never comes (a timeout, which `ignore_errors` deliberately does not
+        forgive), and a script that didn't wait would type the password at
+        the CLI, where it lands in swlog. So the command goes out on its own,
+        expecting either a password prompt or the CLI prompt, and the
+        password is sent only if what came back actually asked for it.
+
+        The CLI half of that is the `#`-excluding pattern so it is the same
+        one used everywhere a "back at the CLI" judgement matters.
+        """
+        transport = self._transport()
+        prompt = self.device.expected_prompt or "->"
+        either = rf"^(?:.*[Pp]assword.*:|(?:[^#]*[^-#])?{re.escape(prompt)})\s*$"
+        opening = transport.send_interactive([(command, either, False)], timeout=timeout)
+        if not _ends_at_password_prompt(opening):
+            # Answered without asking -- a refusal, or at least not the
+            # dialogue we came for. Raised as a rejection (which a step's
+            # `ignore_errors` may forgive), and crucially before the password
+            # has been typed anywhere.
+            raise CommandExecutionError(
+                f"'{command}' did not ask for a password: {opening.strip() or '(no output)'}"
+            )
+        interactions: list[tuple[str, str, bool]] = []
+        # Every entry but the last is answered by another password prompt; the
+        # last one is what returns the session to the CLI.
+        for index in range(entries):
+            last = index == entries - 1
+            expected = self._cli_prompt_pattern_outside_su() if last else SUPER_USER_PASSWORD_PROMPT
+            interactions.append((password, expected, True))
+        output = opening + transport.send_interactive(interactions, timeout=timeout)
+        if any(
+            marker in output.lower()
+            for marker in ["error", "invalid", "incorrect", "do not match", "does not match"]
+        ):
+            raise CommandExecutionError(f"Device rejected '{command}': {output.strip()}")
+        return output
+
+    def run_in_su_shell(
+        self,
+        commands: list[str],
+        su_password: str | None = None,
+        shell_prompt: str = "#->",
+        timeout: int = 30,
+    ) -> str:
+        """Run `commands` in the `su` shell, then come back to the CLI.
+
+        AOS keeps /flash/system out of reach of both the ordinary CLI's file
+        commands and SFTP, so the su shell is the only place the files in it
+        (the generated SSH host keys, for one) can be observed at all.
+
+        The dialogue, as the device actually prints it:
+
+            -> su
+            Password:
+            Entering maintenance shell. Type 'exit' when you are done.
+            MEDORA #->
+
+        So `shell_prompt` defaults to the `#->` tail rather than to the whole
+        prompt: the part in front of it is a per-device alias ("MEDORA"
+        here), and the pattern built from it allows any prefix, which keeps
+        this working across devices without configuring the alias anywhere.
+
+        The shell is always left again, including when a command in the
+        middle fails: a session stranded at a shell prompt breaks every
+        later step of the run, which then looks like an unrelated failure in
+        whatever testcase happens to come next -- and because that prompt
+        ends in "->" it would not even look stranded, it would look like a
+        CLI that has started answering very strangely.
+        """
+        transport = self._transport()
+        shell_pattern = f"^.*{re.escape(shell_prompt)}\\s*$"
+        interactions: list[tuple[str, str, bool]] = []
+        if su_password:
+            interactions.append(("su", "Password:", False))
+            interactions.append((su_password, shell_pattern, True))
+        else:
+            interactions.append(("su", shell_pattern, False))
+        interactions.extend((command, shell_pattern, False) for command in commands)
+        try:
+            output = transport.send_interactive(interactions, timeout=timeout)
+        except Exception:
+            # Best effort only, and deliberately not allowed to raise: an exit
+            # that also fails must not replace the original error, which says
+            # far more about what actually went wrong.
+            try:
+                self._leave_su_shell(timeout)
+            except Exception:
+                pass
+            raise
+        self._leave_su_shell(timeout)
+        return output
+
+    def _leave_su_shell(self, timeout: int) -> None:
+        try:
+            # The `#`-excluding pattern, not the ordinary one: the shell's own
+            # prompt satisfies the ordinary one, so this check would pass
+            # without having left the shell at all.
+            self._transport().send_interactive(
+                [("exit", self._cli_prompt_pattern_outside_su(), False)], timeout=timeout
+            )
+        except Exception as exc:
+            raise CommandExecutionError(
+                "Could not get back to the CLI prompt after the su shell -- the session is "
+                f"stranded in the shell, so later steps will fail too: {exc}"
+            ) from exc
 
     def restore_baseline(self, source: str | None = None) -> None:
         if not source:
@@ -186,6 +363,17 @@ class AOSSwitchDriver(BaseSwitchDriver):
                 f"{self.device.transport.value} transport is not connected"
             )
         return self.transport
+
+
+def _ends_at_password_prompt(text: str) -> bool:
+    """Whether the last thing the device printed is a request for a password.
+
+    Judged on the last non-empty line, so it holds whether or not the
+    transport stripped a trailing CLI prompt from the output it returned."""
+    for line in reversed(text.splitlines()):
+        if line.strip():
+            return re.search(r"[Pp]assword.*:\s*$", line) is not None
+    return False
 
 
 def _is_repeatable(command: str) -> bool:

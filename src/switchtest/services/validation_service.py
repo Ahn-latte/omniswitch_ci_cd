@@ -56,6 +56,7 @@ class ValidationService:
             ValidationType.SSH_LEGACY_REJECTED: self._validate_ssh_legacy_rejected,
             ValidationType.SSH_SESSION_EXPIRES: self._validate_ssh_session_expires,
             ValidationType.SFTP_DOWNLOAD_BLOCKED: self._validate_sftp_download_blocked,
+            ValidationType.SU_SHELL_FILES_EXIST: self._validate_su_shell_files_exist,
         }
         handler = handlers[validation.type]
         if validation.type in _SNMP_VALIDATIONS:
@@ -355,6 +356,46 @@ class ValidationService:
             message=None
             if blocked
             else f"'{username}' was able to download '{remote_path}' over SFTP",
+        )
+
+    def _validate_su_shell_files_exist(
+        self, driver: BaseSwitchDriver, validation: ValidationStep
+    ) -> ValidationResult:
+        """Prove files matching `path` are actually present, by listing them
+        in the `su` shell -- the only place /flash/system can be read from at
+        all, since neither the CLI's file commands nor SFTP reach into it."""
+        pattern = validation.path
+        if not pattern or pattern == "/":
+            raise ValidationExecutionError(
+                f"Validation '{validation.name}' requires 'path' (the file glob to list)"
+            )
+        output = driver.run_in_su_shell(
+            [f"ls -l {pattern}"],
+            su_password=validation.su_password,
+            shell_prompt=validation.shell_prompt,
+            timeout=validation.timeout,
+        )
+        matches = _listed_files(output)
+        enough = len(matches) >= validation.min_matches
+        expected = (
+            f"at least {validation.min_matches} file(s) matching '{pattern}' in the su shell"
+        )
+        if not enough:
+            return ValidationResult(
+                name=validation.name,
+                status=ResultStatus.FAIL,
+                observed=f"{len(matches)} file(s) listed: {output.strip()[:400]}",
+                expected=expected,
+                message=f"'ls -l {pattern}' listed {len(matches)} file(s), expected at least "
+                f"{validation.min_matches} -- the files are missing, or `ls` could not read "
+                f"the directory",
+            )
+        return ValidationResult(
+            name=validation.name,
+            status=ResultStatus.PASS,
+            observed=f"{len(matches)} file(s) listed: {', '.join(matches)}",
+            expected=expected,
+            message=None,
         )
 
     def _validate_snmp_get(self, driver: BaseSwitchDriver, validation: ValidationStep) -> ValidationResult:
@@ -679,6 +720,27 @@ class ValidationService:
         if not validation.command:
             raise ValidationExecutionError(f"Validation '{validation.name}' requires a command")
         return driver.run_show(validation.command, timeout=validation.timeout, reauth=validation.reauth)
+
+
+_LS_LONG_ENTRY = re.compile(r"^[-dlbcps][rwxsStT-]{9}[.+]?\s+\S+")
+
+
+def _listed_files(output: str) -> list[str]:
+    """The file names in `ls -l` output.
+
+    Keyed off the permission-bit column rather than by excluding everything
+    that isn't a file: the buffer also carries the echoed command, the shell
+    prompt, and on failure an `ls: ...: No such file or directory` line, and
+    an exclusion list would silently count any line nobody thought to
+    exclude -- a false pass for a check whose whole job is proving the files
+    are there.
+    """
+    names = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if _LS_LONG_ENTRY.match(stripped):
+            names.append(stripped.split()[-1])
+    return names
 
 
 def _snmp_params(validation: ValidationStep) -> SnmpV3Params:

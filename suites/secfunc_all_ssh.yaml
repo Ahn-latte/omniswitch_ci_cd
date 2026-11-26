@@ -46,7 +46,7 @@ tests:
   - ../testcases/secfunc/check_tls_version.yaml
   - ../testcases/secfunc/check_ssh_version.yaml
   - ../testcases/secfunc/check_webview_tls_version.yaml
-  - ../testcases/secfunc/check_webview_tls11_rejected.yaml
+  - ../testcases/secfunc/check_webview_tls_legacy_rejected.yaml
   - ../testcases/secfunc/check_ssh_legacy_rejected.yaml
   - ../testcases/secfunc/check_sftp_usertable_blocked.yaml
   # 8.x 감사

@@ -17,6 +17,15 @@ class TestStep(BaseModel):
     username: Optional[str] = None
     wrong_password: Optional[str] = None
     attempts: int = 3
+    # For `set_super_user_password`: the password to set. Distinct from
+    # `wrong_password`, which exists to be rejected -- this one is meant to
+    # work, and is what the matching `su_password` validation field then uses.
+    password: Optional[str] = None
+    # How many times that dialogue asks for the password (set, then confirm --
+    # hence 2). A parameter rather than a constant because the count is the
+    # one part of the dialogue that differs between firmwares, and getting it
+    # wrong does not fail cleanly -- see the driver method's docstring.
+    password_entries: int = 2
 
 
 class SnmpCredentials(BaseModel):
@@ -145,6 +154,20 @@ class ValidationStep(BaseModel):
     # session that survives isn't mistaken for one that expired just outside
     # a race with the switch's own timer.
     idle_seconds: int = 75
+
+    # For su_shell_files_exist: the `su` shell's own password (set separately
+    # from any account's, by `super-user-password set`), and the tail of the
+    # prompt that shell presents. The device prints "MEDORA #-> ", where the
+    # part before `#->` is a per-device alias -- so only the tail is
+    # configured here and any prefix is allowed. Leave su_password unset if a
+    # device grants the shell without asking.
+    su_password: Optional[str] = None
+    shell_prompt: str = "#->"
+    # For su_shell_files_exist: how many matching files must be listed. The
+    # point of a glob like `/flash/system/ssh*` is usually that a *set* of
+    # keys was generated, and "at least one of them is there" would pass on a
+    # half-generated set.
+    min_matches: int = 1
 
 
 class TestCaseDefinition(BaseModel):

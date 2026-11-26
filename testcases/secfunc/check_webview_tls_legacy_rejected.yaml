@@ -1,0 +1,40 @@
+id: TC-DP-716B
+name: WebView refuses TLS below 1.2
+description: >-
+  TC-DP-716(설정값)/TC-DP-713(정상 협상 캡처)의 반대편 - "1.2 이상만 허용"은 1.2 미만을
+  실제로 거부해야 증명됨. Firefox를 각각 TLS 1.0 / TLS 1.1 하나만 쓰도록(min=max) 제한해
+  WebView(443)에 접속을 시도하고, 두 경우 모두 핸드셰이크 자체가 실패하는지 확인.
+
+  1.2는 검증 대상이 아님 - 이 장비의 기준이 "1.2 이상"이므로 1.2는 통해야 정상이고,
+  실제로 TC-DP-713이 ServerHello가 TLS 1.2로 협상되는 것을 캡처로 증명함. 기준이
+  나중에 1.3 이상으로 올라가면, 여기에 tls_version "1.2" 검증을 추가하는 동시에
+  TC-DP-713(expected: TLS 1.2)과 TC-DP-716(pattern: TLS Version = 1.[23])도 함께
+  고쳐야 함 - 한쪽만 바꾸면 둘 중 하나는 반드시 실패함.
+
+  Chromium이 아니라 Firefox: Chromium은 최대 TLS 버전을 강제하는 기능을 오래전에
+  제거해서, 뭘 요청하든 서버가 지원하는 최고 버전으로 그냥 협상해버림 - 아무것도
+  증명하지 못함. Firefox는 여전히 security.tls.version.min/max를 launch 시점의
+  firefox_user_prefs로 줄 수 있어서, 실제로 다운그레이드된 핸드셰이크를 "시도하고
+  실패"할 수 있는 유일한 브라우저.
+
+  playwright install firefox 가 필요함(chromium과 별개로 설치해야 함).
+feature: system
+tags: [secfunc, transport, network, tls]
+severity: high
+setup: []
+validations:
+  - name: TLS 1.0으로 제한된 Firefox의 WebView 접속이 실패함
+    type: web_tls_restricted_unreachable
+    target: $host
+    port: 443
+    tls_version: "1.0"
+    timeout: 20
+  - name: TLS 1.1으로 제한된 Firefox의 WebView 접속이 실패함
+    type: web_tls_restricted_unreachable
+    target: $host
+    port: 443
+    tls_version: "1.1"
+    timeout: 20
+cleanup: []
+continue_on_failure: false
+timeout: 90

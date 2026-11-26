@@ -22,6 +22,7 @@ class ValidationType(str, Enum):
     SSH_LEGACY_REJECTED = "ssh_legacy_rejected"
     SSH_SESSION_EXPIRES = "ssh_session_expires"
     SFTP_DOWNLOAD_BLOCKED = "sftp_download_blocked"
+    SU_SHELL_FILES_EXIST = "su_shell_files_exist"
 
 
 class TransportProtocol(str, Enum):
@@ -55,6 +56,8 @@ class TestAction(str, Enum):
     REBOOT = "reboot"
     TRIGGER_FAILED_LOGINS = "trigger_failed_logins"
     ENSURE_UNLOCKED = "ensure_unlocked"
+    SET_SUPER_USER_PASSWORD = "set_super_user_password"
+    RESET_SUPER_USER_PASSWORD = "reset_super_user_password"
 
 
 class Severity(str, Enum):

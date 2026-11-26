@@ -52,6 +52,11 @@ class LabSwitch(BaseModel):
     # this back afterwards.
     system_name: str = "OS6900"
     expected_firmware: Optional[str] = None
+    # The version this switch was upgraded *from*, for the audit check that
+    # the upgrade record names both sides of the jump (TC-SM-443). Only that
+    # one testcase needs it, and only a switch that has actually been
+    # upgraded has an answer -- hence optional, like expected_firmware.
+    previous_firmware: Optional[str] = None
     expected_prompt: str = "->"
     # A port the VLAN-tagging testcase can put in a test VLAN and take out
     # again. Chassis-specific: 1/1/15 exists on an OS6900 and not on every
@@ -194,6 +199,8 @@ class LabConfig(BaseModel):
             # Left unsubstituted when unset: an empty `pattern: "$expected_firmware"`
             # matches anything, i.e. a firmware check that silently passes.
             variables["expected_firmware"] = self.switch.expected_firmware
+        if self.switch.previous_firmware:
+            variables["previous_firmware"] = self.switch.previous_firmware
         for role, account in self.accounts.items():
             variables[f"{role}_user"] = account.username
         for name, value in self.baseline.model_dump().items():
